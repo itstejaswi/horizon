@@ -1,0 +1,48 @@
+{
+  "app": {
+    "name": "horizon",
+    "displayName": "Horizon",
+    "tagline": "Your models, running on your machine",
+    "author": "Tejaswi",
+    "contactUrl": "https://itstejaswi.github.io/#contact"
+  },
+  "web": {
+    "host": "127.0.0.1",
+    "port": 3000,
+    "portSearchLimit": 20,
+    "openBrowser": true
+  },
+  "model": {
+    "alias": "phi-4"
+  },
+  "foundry": {
+    "apiPrefix": "/v1",
+    "requestTimeoutMs": 120000,
+    "statusTimeoutMs": 5000,
+    "statusCacheMs": 3000,
+    "warmUpOnStart": true,
+    "warmUpTimeoutMs": 300000,
+    "unloadOnExit": true,
+    "stopServiceOnExit": false
+  },
+  "chat": {
+    "systemPrompt": "You are a helpful, concise local assistant.",
+    "historyLimit": 30,
+    "maxMessageChars": 20000,
+    "maxRequestBytes": 1000000,
+    "temperature": 0.7,
+    "stream": true
+  },
+  "runtime": {
+    "directory": ".runtime",
+    "stateFile": "horizon.json"
+  },
+  "backup": {
+    "enabled": false,
+    "directory": null
+  },
+  "reader": {
+    "enabled": false,
+    "maxChars": 12000
+  }
+}

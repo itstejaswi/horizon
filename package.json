@@ -1,0 +1,21 @@
+{
+  "name": "horizon",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Your models, running on your machine. Local web chat and model management for Microsoft Foundry Local, with no runtime dependencies.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/regression.js",
+    "build": "node tools/build-html.js",
+    "check": "node --check src/server.js && node --check src/config.js && node --check src/foundry.js && node --check src/net.js && node --check src/runtime.js && node --check src/desktop.js && node --check src/backup.js && node --check src/reader.js && node --check public/app.js && node --check public/store.js",
+    "icons": "node tools/build-icons-png.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

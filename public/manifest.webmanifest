@@ -1,0 +1,37 @@
+{
+  "name": "Horizon",
+  "short_name": "Horizon",
+  "description": "An air-gapped mind that thinks and works with you.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0d1015",
+  "theme_color": "#0d1015",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/brand/mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
