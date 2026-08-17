@@ -1,4 +1,4 @@
-# Horizon
+﻿# Horizon
 
 **Your models, running on your machine.**
 
@@ -178,7 +178,7 @@ Some things are fixed by your hardware, and some are not.
 
 ### A note on ARM machines
 
-On Snapdragon X Elite hardware, Windows reports an NPU, but Foundry Local 0.10.3 publishes **no NPU model variants** â€” every catalogue entry targets CPU, except `phi-4` which has a WebGPU variant. The NPU therefore sits idle. `Optimize-Horizon.ps1` detects this and says so plainly rather than letting you assume otherwise.
+On Snapdragon X Elite hardware, Windows reports an NPU, but Foundry Local 0.10.3 publishes **no NPU model variants** — every catalogue entry targets CPU, except `phi-4` which has a WebGPU variant. The NPU therefore sits idle. `Optimize-Horizon.ps1` detects this and says so plainly rather than letting you assume otherwise.
 
 Measured on a Snapdragon X Elite X1E80100:
 
@@ -331,8 +331,8 @@ Every model downloaded on this machine, with its hardware target and size. Switc
 
 Click the gear icon to experiment live:
 
-- **Instructions for the model** â€” change its character. Try `You are a terse pirate.` and send a message.
-- **Creativity** â€” drag to `0` and ask the same question twice; you should get near-identical answers. Drag to `1.8` and the replies get far more inventive.
+- **Instructions for the model** — change its character. Try `You are a terse pirate.` and send a message.
+- **Creativity** — drag to `0` and ask the same question twice; you should get near-identical answers. Drag to `1.8` and the replies get far more inventive.
 
 Both apply to your next message. No restart needed.
 

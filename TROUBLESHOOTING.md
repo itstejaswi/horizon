@@ -1,6 +1,6 @@
-# Troubleshooting
+﻿# Troubleshooting
 
-Start here. Run the health check â€” it tests all three pieces and tells you which one is unhappy.
+Start here. Run the health check — it tests all three pieces and tells you which one is unhappy.
 
 ```powershell
 .\scripts\Test-Horizon.ps1
@@ -113,7 +113,7 @@ The page rechecks automatically every twenty seconds.
 
 ## The page says "Local server unavailable"
 
-The Node.js server has stopped. Look at the PowerShell window that started it â€” if it has closed or shows an error, run `Start-Horizon.ps1` again.
+The Node.js server has stopped. Look at the PowerShell window that started it — if it has closed or shows an error, run `Start-Horizon.ps1` again.
 
 ## A reply times out
 
@@ -135,7 +135,7 @@ You have exceeded the request size limit. Click **Clear chat** to start fresh, o
 
 ## The model forgets earlier parts of the conversation
 
-By design. Only the most recent `chat.historyLimit` messages are sent, to keep replies fast. When older messages are dropped, the note under the input box says so. Raise the limit in `config.json` if you need longer memory â€” at the cost of speed.
+By design. Only the most recent `chat.historyLimit` messages are sent, to keep replies fast. When older messages are dropped, the note under the input box says so. Raise the limit in `config.json` if you need longer memory — at the cost of speed.
 
 ## Replies are slow
 
@@ -170,7 +170,7 @@ Every message re-sends the conversation so far for reprocessing. Click **Clear**
 
 If the note says *cut off at the length limit*, the model reached its output cap. Ask it to be more concise, or ask for the remainder.
 
-If you pressed stop or `Esc`, that is expected â€” whatever had been written is kept.
+If you pressed stop or `Esc`, that is expected — whatever had been written is kept.
 
 ## Opening the Foundry address shows a 404
 
