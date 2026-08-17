@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8">
+<style>
+  html,body{margin:0;padding:0;background:#010205;}
+  .card{position:relative;width:1280px;height:640px;overflow:hidden;}
+  .card img{position:absolute;inset:0;width:1280px;height:640px;display:block;}
+  .lockup{position:absolute;left:760px;top:0;width:480px;height:640px;
+          display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;}
+  .word{font-family:"Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;
+        font-size:52px;font-weight:600;color:#fff;letter-spacing:-1px;line-height:1;}
+  .tag{font-family:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+       font-size:17px;font-weight:400;color:#a6b0bf;line-height:1;text-align:center;}
+</style></head>
+<body>
+  <div class="card">
+      <img src="social-preview-base.jpg">
+    <div class="lockup">
+      <svg width="104" height="104" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+        <rect width="32" height="32" rx="7" fill="#0F6CBD"/>
+        <g transform="translate(16 16) scale(0.74) translate(-16 -16)">
+          <circle cx="16" cy="16" r="6" fill="#ffffff"/>
+          <g fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round">
+            <path d="M16 5.6a10.4 10.4 0 0 1 0 20.8"/>
+            <path d="M16 26.4a10.4 10.4 0 0 1-8.6-4.5"/>
+          </g>
+        </g>
+      </svg>
+      <div class="word">Horizon</div>
+      <div class="tag">Your models,<br>running on your machine.</div>
+    </div>
+  </div>
+</body>
+</html>

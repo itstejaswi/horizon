@@ -1,6 +1,6 @@
-﻿# Horizon
+﻿![Horizon — your models, running on your machine.](.github/assets/banner.png)
 
-**Your models, running on your machine.**
+# Horizon
 
 A private AI chat and model manager, powered by **Microsoft Foundry Local**. Start and stop the service, browse and load models, and chat with them — all from one page, all on your own hardware.
 

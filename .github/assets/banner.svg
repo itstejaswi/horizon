@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-label="Horizon — your models, running on your machine">
+  <title>Horizon</title>
+  <!--
+    README banner. Hand-drawn so the mark is exact: the tile, the solid world
+    and the open orbital arc are the same geometry as public/brand/mark.svg,
+    scaled up rather than redrawn, so the two can never drift apart.
+
+    The large arc on the right is a deliberate echo, not a clone. It uses the
+    same open-orbit language at a thinner weight, because a faithfully scaled
+    stroke reads as a heavy band at this size and fights the lockup.
+  -->
+
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#479ef5" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#479ef5" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="horizonLine" gradientUnits="userSpaceOnUse" x1="40" y1="0" x2="1240" y2="0">
+      <stop offset="0%" stop-color="#479ef5" stop-opacity="0"/>
+      <stop offset="20%" stop-color="#479ef5" stop-opacity="0.55"/>
+      <stop offset="80%" stop-color="#479ef5" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#479ef5" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="320" fill="#0d1015"/>
+
+  <!-- Ambient light behind the lockup, echoing the app's surface glow. -->
+  <ellipse cx="240" cy="160" rx="360" ry="220" fill="url(#glow)"/>
+
+  <!-- The horizon the product is named for. It runs behind the lockup and
+       through the centre of the orbit, tying the two ends together. -->
+  <line x1="40" y1="160" x2="1240" y2="160" stroke="url(#horizonLine)" stroke-width="2"/>
+
+  <!-- Open orbit, oversized. Same sweep and asymmetric break as the mark. -->
+  <g fill="none" stroke="#479ef5" stroke-linecap="round" opacity="0.60">
+    <path d="M1000 30a130 130 0 0 1 0 260" stroke-width="9"/>
+    <path d="M1000 290a130 130 0 0 1-107.5-56.25" stroke-width="9"/>
+  </g>
+  <circle cx="1000" cy="160" r="26" fill="#479ef5" opacity="0.55"/>
+
+  <!-- The mark, at 3.5x. Inner coordinates are untouched from mark.svg. -->
+  <g transform="translate(96 104) scale(3.5)">
+    <rect width="32" height="32" rx="7" fill="#0F6CBD"/>
+    <g transform="translate(16 16) scale(0.74) translate(-16 -16)">
+      <circle cx="16" cy="16" r="6" fill="#ffffff"/>
+      <g fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round">
+        <path d="M16 5.6a10.4 10.4 0 0 1 0 20.8"/>
+        <path d="M16 26.4a10.4 10.4 0 0 1-8.6-4.5"/>
+      </g>
+    </g>
+  </g>
+
+  <g font-family="'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif">
+    <text x="248" y="162" font-size="58" font-weight="600" fill="#ffffff" letter-spacing="-1">Horizon</text>
+    <text x="250" y="200" font-size="21" font-weight="400" fill="#a6b0bf">Your models, running on your machine.</text>
+  </g>
+</svg>
