@@ -258,7 +258,10 @@ async function readLinkedPages(message) {
   const blocks = [];
 
   for (const url of urls) {
-    setNote(`Reading ${new URL(url).hostname}...`);
+    let hostname = "";
+    try { hostname = new URL(url).hostname; } catch { /* shown as a page instead */ }
+    setNote(`Reading ${hostname || url}...`);
+    markReachingOut(hostname);
     try {
       const response = await fetch("/api/reader", {
         method: "POST",
@@ -278,6 +281,8 @@ async function readLinkedPages(message) {
       pages.push({ url, failed: true, reason: error.message });
       blocks.push(`--- Page: ${url}\n--- Could not be read: ${error.message}`);
       setNote(error.message, "warn");
+    } finally {
+      clearReachingOut();
     }
   }
 
@@ -303,9 +308,22 @@ for (const button of document.querySelectorAll("[data-theme-set]")) {
 
 /* ============================================================== air gap === */
 
-// Passive only. Actively probing the internet to prove there is no internet
-// would defeat the purpose, so this reads the browser's own signal.
+// Two different things share this badge.
+//
+// At rest it reports whether a network exists at all, read passively from the
+// browser's own signal. Actively probing the internet to prove there is no
+// internet would defeat the purpose.
+//
+// While a page is being fetched it becomes an activity light, in the way the
+// operating system shows one while the camera or microphone is live. That is
+// the state worth surfacing: "runs locally" is a claim anyone can verify for
+// themselves, but a fetch is a real event, happening now, and it should be
+// visible while it happens rather than only afterwards in the Traffic panel.
+let reachOutTimer = null;
+
 function refreshAirGap() {
+  if (ui.airgapBadge.dataset.state === "reaching") return;
+
   const online = navigator.onLine;
   ui.airgapBadge.dataset.state = online ? "online" : "isolated";
 
@@ -319,6 +337,39 @@ function refreshAirGap() {
   const use = ui.airgapGlyph && ui.airgapGlyph.querySelector("use");
   if (use) use.setAttribute("href", online ? "#i-plug-on" : "#i-globe-off");
   if (state.drawer === "connection") renderDrawer();
+}
+
+// Called around a page fetch. The host is named, because "something reached
+// out" is alarming and "reading example.com" is a fact.
+//
+// Deliberately not called the model reaching out: the model has no network
+// access of its own. Horizon fetches the page and hands over the text.
+function markReachingOut(hostname) {
+  clearTimeout(reachOutTimer);
+  reachOutTimer = null;
+
+  ui.airgapBadge.dataset.state = "reaching";
+  ui.airgapText.textContent = hostname ? `Reading ${hostname}` : "Reading a page";
+  ui.airgapBadge.title = hostname
+    ? `Horizon is fetching ${hostname} so the model can read it. The page text stays on this machine.`
+    : "Horizon is fetching a page so the model can read it. The page text stays on this machine.";
+
+  const use = ui.airgapGlyph && ui.airgapGlyph.querySelector("use");
+  if (use) use.setAttribute("href", "#i-globe");
+  if (state.drawer === "connection") renderDrawer();
+}
+
+// Held briefly after the fetch finishes, so a quick read still registers as
+// something you saw happen rather than a flicker you might have missed.
+function clearReachingOut() {
+  clearTimeout(reachOutTimer);
+  reachOutTimer = setTimeout(() => {
+    reachOutTimer = null;
+    if (ui.airgapBadge.dataset.state === "reaching") {
+      ui.airgapBadge.dataset.state = "";
+      refreshAirGap();
+    }
+  }, 2500);
 }
 
 window.addEventListener("online", refreshAirGap);
@@ -1001,11 +1052,37 @@ function renderAbout() {
   mineHead.append(brandMark("horizon"), el("h3", "about-credit-title", "About Horizon"));
   mine.append(mineHead);
   mine.append(el("p", "about-credit-body",
-    "Horizon is an independent, offline-first front end for local AI models. It gives you a window, a model picker and a place to keep your chats, so that running a model on your own machine does not require a terminal. It collects nothing, has no account, and sends nothing anywhere. Designed and built by Tejaswi."));
+    "Horizon is an independent, offline-first front end for local AI models. It gives you a window, a model picker and a place to keep your chats, so that running a model on your own machine does not require a terminal. It collects nothing, has no account, and sends nothing anywhere."));
+
+  // The author's page, named as a link rather than as prose, because someone
+  // reading the credits is the one person likely to want it. It opens in the
+  // browser like any other link; Horizon sends nothing.
+  const authorUrl = state.app?.contactUrl;
+  const byline = el("p", "about-credit-body");
+  byline.append(document.createTextNode("Designed and built by "));
+  if (authorUrl) {
+    const link = el("a", "about-credit-link");
+    link.href = authorUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = state.app?.author || "Tejaswi";
+    byline.append(link);
+  } else {
+    byline.append(document.createTextNode(state.app?.author || "Tejaswi"));
+  }
+  byline.append(document.createTextNode("."));
+  mine.append(byline);
 
   const theirs = el("div", "about-credit");
   const theirsHead = el("div", "about-credit-head");
-  theirsHead.append(brandMark("foundry"), el("h3", "about-credit-title", "Microsoft AI Foundry"));
+  const theirsTitle = el("h3", "about-credit-title");
+  const theirsLink = el("a", "about-credit-link");
+  theirsLink.href = "https://learn.microsoft.com/en-us/azure/foundry-local/";
+  theirsLink.target = "_blank";
+  theirsLink.rel = "noopener noreferrer";
+  theirsLink.textContent = "Microsoft AI Foundry";
+  theirsTitle.append(theirsLink);
+  theirsHead.append(brandMark("foundry"), theirsTitle);
   theirs.append(theirsHead);
   theirs.append(el("p", "about-credit-body",
     "Foundry Local is Microsoft's runtime for running AI models on your own hardware. It downloads models, manages the cache and serves them over a local endpoint. Horizon talks to that endpoint but is not part of it, and does not modify it."));
@@ -1056,6 +1133,32 @@ function renderAbout() {
 // Foundry's is loaded from the copy installed on this machine, so the real
 // product icon is shown without this project redistributing Microsoft's
 // artwork; if Foundry is not installed, the original crucible glyph stands in.
+// Foundry Local's own icon, read from wherever Microsoft installed it on this
+// machine and served by src/brand.js. Naming Microsoft's product but drawing
+// our own glyph for it invites the opposite of the intended reading: it looks
+// like the brand is being approximated rather than credited. So where the name
+// appears, the real mark appears with it.
+//
+// The fallback glyph is still drawn first and stays if Foundry is not
+// installed, or if the icon cannot be read. No Microsoft artwork is kept in
+// this repository; it is only ever read from the local install.
+function foundryMark(fallbackId, className) {
+  const wrap = el("span", className);
+  wrap.append(icon(fallbackId, className ? `${className}-glyph` : null));
+
+  const real = new Image();
+  real.alt = "";
+  real.className = className ? `${className}-img` : "";
+  real.addEventListener("load", () => {
+    wrap.textContent = "";
+    wrap.append(real);
+    wrap.dataset.real = "true";
+  });
+  real.src = "/api/brand/foundry";
+
+  return wrap;
+}
+
 function brandMark(which) {
   const wrap = el("span", "about-brand-mark");
   wrap.dataset.brand = which;
@@ -1346,6 +1449,48 @@ let settingsSection = "behaviour";
 
 // Every section renderer calls this to open a card, then appends its controls
 // to whatever comes back.
+/* --- saved confirmation --------------------------------------------------- */
+
+// Most settings save the moment you change them, with no Save button. That is
+// the right behaviour, but silence leaves you wondering whether it took. This
+// is the smallest honest answer: a brief "Saved" beside the control that
+// changed, announced to screen readers, then gone.
+//
+// Deliberately not a toast. A toast for a slider you are still dragging would
+// be worse than saying nothing at all.
+//
+// Two timers, kept apart on purpose: one waits for typing to stop before
+// claiming anything was saved, the other clears the message afterwards. Share
+// a single map between them and the clear fires against the debounce, so the
+// message is removed before it is ever shown.
+const savedFadeTimers = new WeakMap();
+const savedDebounceTimers = new WeakMap();
+
+function markSaved(field, label = "Saved") {
+  if (!field) return;
+
+  let flag = field.querySelector(":scope > .saved-flag");
+  if (!flag) {
+    flag = el("span", "saved-flag");
+    flag.setAttribute("role", "status");
+    flag.setAttribute("aria-live", "polite");
+    field.append(flag);
+  }
+
+  flag.textContent = label;
+  flag.dataset.on = "true";
+
+  clearTimeout(savedFadeTimers.get(flag));
+  savedFadeTimers.set(flag, setTimeout(() => { flag.dataset.on = "false"; }, 1600));
+}
+
+// Settings that save on every keystroke should not claim to have saved on
+// every keystroke. This waits for a pause first.
+function debounceSaved(field, delay = 500) {
+  clearTimeout(savedDebounceTimers.get(field));
+  savedDebounceTimers.set(field, setTimeout(() => markSaved(field), delay));
+}
+
 function settingsCard(parent, title, blurb) {
   const card = el("section", "settings-card");
   card.append(el("h3", "settings-card-title", title));
@@ -1664,7 +1809,10 @@ function renderSettings() {
     const button = el("button", "settings-nav-btn");
     button.type = "button";
     button.setAttribute("aria-current", String(section.id === settingsSection));
-    button.append(icon(section.icon, "settings-nav-icon"),
+    button.append(
+      section.id === "foundry"
+        ? foundryMark("i-foundry", "settings-nav-mark")
+        : icon(section.icon, "settings-nav-icon"),
       el("span", null, section.name));
     button.addEventListener("click", () => {
       settingsSection = section.id;
@@ -1727,6 +1875,7 @@ function renderBehaviourSettings(panel) {
   promptInput.addEventListener("input", () => {
     state.settings.systemPrompt = promptInput.value;
     db.setPref("systemPrompt", promptInput.value);
+    debounceSaved(promptField);
   });
   promptField.append(promptLabel, promptInput,
     el("p", "field-hint", "Sets its character. Applies to your next message."));
@@ -1744,6 +1893,7 @@ function renderBehaviourSettings(panel) {
     state.settings.temperature = Number(range.value);
     pill.textContent = Number(range.value).toFixed(1);
     db.setPref("temperature", Number(range.value));
+    debounceSaved(tempField);
   });
   const scale = el("div", "scale");
   scale.append(el("span", null, "Focused"), el("span", null, "Balanced"), el("span", null, "Inventive"));
@@ -1761,6 +1911,10 @@ function renderBehaviourSettings(panel) {
     db.setPref("systemPrompt", null);
     db.setPref("temperature", null);
     renderSettings();
+    // renderSettings rebuilds the panel, so the confirmation has to be put on
+    // the freshly drawn field rather than the one that was just discarded.
+    const field = document.querySelector(".settings-panel .field");
+    if (field) markSaved(field, "Reset to defaults");
   });
   card.append(reset);
 
@@ -2609,13 +2763,36 @@ async function safeExit() {
   } catch { /* the server may close before replying; that is expected */ }
 
   $("exit-body").textContent = stopService
-    ? "The model has been released and the Foundry service stopped. You can close this tab."
-    : "The model has been released and the local server stopped. You can close this tab.";
+    ? "The model has been released and the Foundry service stopped."
+    : "The model has been released and the local server stopped.";
   $("exit-stop-service").closest(".modal-check").hidden = true;
   $("exit-cancel").hidden = true;
-  confirm.textContent = "Done";
+  confirm.textContent = "Close this tab";
   confirm.disabled = false;
-  confirm.onclick = () => window.close();
+
+  // window.close() only works on a tab that script opened. Horizon's tab comes
+  // from the launcher, so most browsers refuse it silently - the button would
+  // look broken. Try it, then say plainly what to do if nothing happened,
+  // rather than leaving the reader clicking a dead control.
+  //
+  // No browser sniffing: Chrome, Edge, Firefox and an installed PWA all behave
+  // differently here, so the check is simply whether this page is still on
+  // screen afterwards. Whatever the browser decided, the outcome is what is
+  // tested.
+  const installed = window.matchMedia?.("(display-mode: standalone)")?.matches;
+  confirm.onclick = () => {
+    window.close();
+    setTimeout(() => {
+      if (document.hidden) return;
+      confirm.hidden = true;
+      const tail = installed
+        ? "You can close this window now."
+        : "Your browser will not let a page close a tab it did not open, so please close this one yourself.";
+      $("exit-body").textContent = (stopService
+        ? "The model has been released and the Foundry service stopped. "
+        : "The model has been released and the local server stopped. ") + tail;
+    }, 250);
+  };
 }
 
 $("exit-btn").addEventListener("click", openExitDialog);

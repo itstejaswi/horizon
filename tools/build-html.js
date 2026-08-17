@@ -55,11 +55,13 @@ const brand = `  <!-- The Horizon mark: a solid world with an open orbital arc s
     <rect x="2.4" y="2.9" width="4.2" height="8.7" rx="1.2"
           fill="none" stroke="currentColor" stroke-width="1.6"/>
   </symbol>
-  <!-- An original crucible mark for the Foundry section, drawn here rather
-       than reproducing Microsoft's Foundry Local artwork: the name is theirs,
-       so the glyph is deliberately ours. A tilted vessel pouring a stream into
-       a pool says "foundry" without borrowing the brand. Attribution sits on
-       the About page. -->
+  <!-- A fallback glyph for the Foundry section, used only when Microsoft's own
+       icon cannot be read from the local install (Foundry not installed, or the
+       package directory unreadable). Where the real mark is available it is
+       shown instead: naming Microsoft's product while drawing our own symbol
+       for it reads as approximating the brand rather than crediting it. A
+       tilted vessel pouring into a pool is the stand-in. Attribution and the
+       trademark notice sit on the About page. -->
   <symbol id="i-foundry" viewBox="0 0 20 20">
     <path d="M3.6 4.3h7.9l-1.5 4.4a2.4 2.4 0 0 1-2.3 1.6H6.9a2.4 2.4 0 0 1-2.3-1.6z"
           fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
