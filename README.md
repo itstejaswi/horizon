@@ -440,3 +440,16 @@ Icons are from [Fluent System Icons](https://github.com/microsoft/fluentui-syste
 - No analytics, telemetry, remote fonts, CDN assets, or third-party libraries. There are zero runtime dependencies; only Node.js built-in modules are used.
 
 > Foundry Local and its REST API are preview features. Review the Microsoft documentation before relying on this for production work.
+
+## Licence
+
+Copyright (C) 2026 Tejaswi C.
+
+Released under the [GNU AGPL v3](LICENSE). You may use, study, modify and share
+it freely. If you run a modified version and let others reach it over a network,
+section 13 requires you to offer them your source as well — rehosting it
+unchanged is welcome, rehosting it changed and silent is not. Running it on your
+own machine for yourself, which is the point of Horizon, triggers nothing.
+
+Fluent System Icons remain under their own MIT licence. See `NOTICE` and
+`COPYRIGHT`.
