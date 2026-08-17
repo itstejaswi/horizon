@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Horizon">
+  <title>Horizon</title>
+  <!--
+    Standalone mark, used as the favicon and anywhere outside the app.
+    A solid world with an open orbital arc sweeping around it: everything
+    stays in orbit, nothing escapes.
+
+    Two shapes only. The previous mark carried four competing systems and
+    closed into a blob below 32px; this one holds its silhouette at 16px.
+    The break in the arc is asymmetric on purpose, so it does not read as
+    a loading spinner.
+
+    This version carries its own tile so it is self-contained. Inside the
+    app the same geometry is used with the tile colour supplied by CSS.
+  -->
+  <rect width="32" height="32" rx="7" fill="#0F6CBD"/>
+  <g transform="translate(16 16) scale(0.74) translate(-16 -16)">
+    <circle cx="16" cy="16" r="6" fill="#ffffff"/>
+    <g fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round">
+      <path d="M16 5.6a10.4 10.4 0 0 1 0 20.8"/>
+      <path d="M16 26.4a10.4 10.4 0 0 1-8.6-4.5"/>
+    </g>
+  </g>
+</svg>
