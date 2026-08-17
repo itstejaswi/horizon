@@ -1143,6 +1143,11 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   .dictation-bar { animation: none; }
 }
 .btn-dictate[aria-pressed="true"] { color: var(--danger); }
+/* Switched off. Shown rather than hidden, because a button nobody can see is a
+   feature nobody discovers; the tooltip says where to switch it on, and
+   pressing it goes there. */
+.btn-dictate.is-off { opacity: 0.42; }
+.btn-dictate.is-off:hover { opacity: 0.72; }
 
 .attachments {
   display: flex;

@@ -205,13 +205,9 @@ foundry server stop
 
 ## The microphone button is missing
 
-Dictation is off until you ask for it. Add this to `config.local.json` and restart Horizon:
+Dictation is off until you ask for it. Switch it on under **Settings → Behaviour**.
 
-```json
-{ "dictation": { "enabled": true } }
-```
-
-If it is switched on and the button still does not appear, the terminal helper it needs is not installed. Run `npm install` in the Horizon folder. Chat is unaffected either way — Horizon says on the page why dictation is unavailable rather than offering a button that cannot work.
+If it is switched on and the button still does not appear, `node-pty` is missing — it is installed with everything else, so this is unusual. Run `npm install` in the Horizon folder and restart. Chat is unaffected either way, and Horizon says on the page why dictation is unavailable rather than offering a button that cannot work.
 
 ## Dictation hears nothing, or hears the wrong microphone
 

@@ -1085,3 +1085,38 @@ test("ui: the dictation setting says where the recording happens", () => {
   assert.match(body, /if \(!status\.available\)/,
     "an unavailable capability must explain itself instead of offering a switch");
 });
+
+test("dictation: switching it on is a one-time decision", () => {
+  const app = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
+  const server = fs.readFileSync(path.join(ROOT, "src", "server.js"), "utf8");
+
+  // Asked for once, remembered on disk. Nobody should have to visit Settings
+  // every time they want to speak.
+  assert.match(server, /saveLocalSettings\(\{ dictation: \{ enabled/,
+    "the choice must be written to the user's own settings file");
+
+  // The model is fetched when the choice is made, not when the first recording
+  // is attempted: a 700 MB download behind a button press is a stall nobody
+  // was warned about.
+  assert.match(server, /if \(body\.enabled\) dictationEnsureModel\(\)/,
+    "agreeing must start the download");
+  assert.match(server, /function dictationEnsureModel/,
+    "and there must be something to start");
+
+  // But it is not held in memory from then on. Loading happens on the first
+  // recording and is released when idle, which is the whole point of the
+  // idle timeout.
+  const ensure = server.slice(server.indexOf("function dictationEnsureModel"));
+  const body = ensure.slice(0, ensure.indexOf("\nasync function"));
+  assert.ok(!/\bfoundry\.loadModel\b|\bensureLoaded\b/.test(body),
+    "downloading must not also load the model into memory");
+
+  // The button stays visible when dictation is off. Hiding it means nobody
+  // ever finds out the feature exists.
+  assert.match(app, /ui\.dictateBtn\.hidden = !state\.dictation\.available/,
+    "the button must be hidden only when the machine cannot run it");
+  assert.match(app, /Dictation is off\. Switch it on in Settings/,
+    "and must say where to switch it on");
+  assert.match(app, /if \(!state\.dictation\.enabled\)[\s\S]{0,240}setMode\("settings"\)/,
+    "pressing it while off must take the user to the switch");
+});

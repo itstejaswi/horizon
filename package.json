@@ -15,8 +15,7 @@
     "engines": {
         "node": ">=18.0.0"
     },
-    "dependencies": {},
-    "optionalDependencies": {
+    "dependencies": {
         "node-pty": "^1.0.0"
     },
     "devDependencies": {},

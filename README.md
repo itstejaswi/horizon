@@ -90,22 +90,6 @@ The first launch downloads the model, which is around 8.4 GB and takes a while. 
 
 > If Windows shows **"Windows protected your PC"**, click **More info** then **Run anyway**. That warning appears for any file from the internet that is not commercially signed. Ticking Unblock in step 3 usually prevents it.
 
-**6. Optional: turn on dictation**
-
-Skip this unless you want to speak instead of type. In the Horizon folder, hold **Shift**, right-click an empty space, choose **Open PowerShell window here**, and run:
-
-```powershell
-npm install
-```
-
-Then open `config.local.json` in Notepad and add:
-
-```json
-{ "dictation": { "enabled": true } }
-```
-
-Restart Horizon and a microphone button appears beside the message box. If `npm install` fails, nothing is broken: Horizon runs exactly as before and simply says why dictation is unavailable.
-
 ### B. If you have Git
 
 Cloning avoids the unblock step entirely, because files created by Git are not tagged as coming from the internet.
@@ -118,18 +102,9 @@ cd horizon
 .\"Start Horizon.bat"
 ```
 
-There is no `npm install` step to chat with a model. Horizon's core has no runtime dependencies.
+There is no `npm install` step to run by hand. `Start Horizon.bat` fetches what it needs the first time you run it, and a `git clone` needs the usual `npm install` once.
 
-Dictation is the one exception. Speaking instead of typing needs a terminal helper that Node does not provide, so it is an *optional* dependency:
-
-```powershell
-cd path\to\horizon
-npm install
-```
-
-If that fails, or you skip it, Horizon still runs and chat is unaffected — the microphone button simply does not appear, and the page says why. Prebuilt helpers ship for Windows and macOS; on Linux `npm install` will try to build it, which needs a compiler.
-
-Dictation is switched off until you ask for it, because it opens the microphone and holds a second model in memory. Turn it on in `config.local.json`:
+Dictation is off until you ask for it, because it opens the microphone and holds a second model in memory. Switch it on under **Settings → Behaviour**, or set it in `config.local.json` if you prefer:
 
 ```json
 { "dictation": { "enabled": true } }

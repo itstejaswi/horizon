@@ -373,8 +373,13 @@
        Horizon re-discovers it and reconnects on its own, mid-session, without losing
        your conversation.</p>
     <p class="lede">Speech takes the second branch because Foundry does not offer it over
-       the REST API. Foundry opens the microphone rather than the page, which is why the
-       browser shows no recording indicator and Horizon shows its own.</p>
+       the REST API — not in v1, and not yet anywhere else. Horizon drives Foundry's own
+       <code>transcribe</code> command through a pseudo terminal, because that command
+       needs a real one and exits immediately when given a plain pipe. Foundry opens the
+       microphone rather than the page, which is why the browser shows no recording
+       indicator and Horizon shows its own. If a future Foundry exposes speech over
+       HTTP, this branch becomes an ordinary request and the extra dependency goes
+       away.</p>
   </div>
 </section>
 
@@ -469,11 +474,9 @@
             <p>Everything else is on the page. Under <strong>Settings &rarr; This machine</strong>
                you can add a desktop shortcut or have Horizon start when you sign in. You
                should not need a terminal again.</p>
-            <p class="note">To speak instead of typing, open a terminal in the Horizon
-               folder once and run <span class="kbd">npm install</span>, then switch
-               dictation on under <strong>Settings &rarr; Behaviour</strong>. It fetches a
-               ready-built helper on Windows and macOS; on Linux it compiles one, which
-               needs a build toolchain. Horizon works without it either way.</p>
+            <p class="note">No <code>npm install</code> to run by hand &mdash;
+               <span class="kbd">Start Horizon.bat</span> fetches what it needs the first
+               time. Everything stays on this machine either way.</p>
           </div>
         </div>
       </div>
@@ -493,6 +496,9 @@
             <h3>Dependencies</h3>
             <pre>winget install Microsoft.FoundryLocal
 winget install OpenJS.NodeJS.LTS</pre>
+            <p class="note">No <code>winget</code>? It ships with Windows 11 and recent
+               Windows 10, but not every machine has it. Use the installers in the
+               column on the left instead — same software, same sources.</p>
           </div>
         </div>
 
@@ -503,7 +509,12 @@ winget install OpenJS.NodeJS.LTS</pre>
             <pre>git clone https://github.com/itstejaswi/horizon
 cd horizon
 .\"Start Horizon.bat"</pre>
-            <p class="note">No <code>npm install</code> to chat with a model &mdash; Horizon&rsquo;s core has no runtime dependencies. Dictation is the one exception: it needs a terminal helper, installed with <code>npm install</code>, and Horizon runs without it.</p>
+            <p class="note">One dependency, and it is the reason speech works. Foundry
+               does not expose transcription over its REST API, so Horizon drives
+               Foundry&rsquo;s own <code>transcribe</code> command &mdash; and that command
+               needs a real terminal, exiting immediately when handed a plain pipe. Node
+               cannot make one, so <a href="https://github.com/microsoft/node-pty">node-pty</a>
+               does. It opens a terminal on this machine and nothing else.</p>
           </div>
         </div>
 

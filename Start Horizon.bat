@@ -42,6 +42,24 @@ if %NODE_MAJOR% LSS 18 (
   exit /b 1
 )
 
+rem  Dictation needs node-pty, which is a real dependency rather than an
+rem  optional one: a feature nobody knows to install is a feature nobody uses.
+rem  Fetching it here means the ZIP download works the same as a git clone,
+rem  without asking anyone to open a terminal first.
+if not exist "node_modules\node-pty" (
+  echo   Setting up, one moment. This happens once.
+  echo.
+  call npm install --no-audit --no-fund
+  if errorlevel 1 (
+    echo.
+    echo   Setup did not finish. Horizon still runs and chat works normally;
+    echo   speaking instead of typing will not be available.
+    echo.
+    timeout /t 5 >nul
+  )
+  echo.
+)
+
 echo   Starting the local server...
 echo   Keep this window open while you use Horizon.
 echo   Press Ctrl+C here when you are finished.

@@ -387,6 +387,33 @@ function dictationSession() {
 // Closing the session ends the CLI, but the speech model stays resident in the
 // Foundry daemon, which outlives Horizon. Releasing it is the whole point of the
 // idle timeout, so it is done explicitly rather than left to chance.
+// Fetching the speech model the moment dictation is switched on, rather than
+// leaving the first recording to stall behind a 700 MB download. It reuses the
+// same progress reporting the model catalogue uses, so the page can show it
+// alongside any other download. Nothing is loaded into memory here: that
+// happens on the first recording, and is released when idle.
+function dictationEnsureModel() {
+  const alias = config.dictation.alias;
+  if (state.downloads.has(alias)) return;
+
+  foundry.cachedModels(20000)
+    .then(cached => {
+      const have = (cached || []).some(model => model.alias === alias || model.id === alias);
+      if (have) return;
+
+      state.downloads.set(alias, { percent: 0, startedAt: Date.now() });
+      return foundry.downloadModel(alias, progress => {
+        const entry = state.downloads.get(alias);
+        if (entry) Object.assign(entry, progress);
+      });
+    })
+    .catch(() => {
+      // A failed download is not fatal: the first recording will try again and
+      // report whatever went wrong at that point.
+    })
+    .then(() => state.downloads.delete(alias));
+}
+
 async function dictationRelease() {
   if (!config.dictation.enabled) return;
   if (!state.loadedByUs.has(config.dictation.alias)) return;
@@ -1077,6 +1104,11 @@ const server = http.createServer((req, res) => {
               state.dictation.session.close();
               state.dictation.session = null;
             }
+            // Fetch the speech model as soon as it is asked for, rather than
+            // leaving the first recording to stall behind a download nobody
+            // was warned about. It is not loaded into memory here: that
+            // happens on the first recording and is released when idle.
+            if (body.enabled) dictationEnsureModel();
             return sendJson(res, 200, dictationStatus());
           }
 

@@ -1705,11 +1705,12 @@ function renderDictationSetup(body) {
       loading.remove();
 
       // Nothing can be switched on if the machine cannot run it, so the reason
-      // is shown instead of a control that would not work.
+      // is shown instead of a control that would not work. This should be rare:
+      // the helper is installed with everything else.
       if (!status.available) {
         const why = el("p", "field-hint");
         why.append(icon("i-warn", "inline-glyph"), document.createTextNode(
-          " Dictation needs a terminal helper that is not installed here. Run npm install in the Horizon folder, then restart Horizon. Everything else works without it."));
+          " Dictation needs node-pty, which is not installed here. Run npm install in the Horizon folder, then restart Horizon. Everything else works without it."));
         section.append(why);
         return;
       }
@@ -1727,6 +1728,14 @@ function renderDictationSetup(body) {
       );
       row.append(input, text);
       section.append(row);
+
+      // Shown whether or not it is switched on. The size of the download and
+      // the reason it ships suspended are what someone needs in order to
+      // decide, and they are no use only after the decision is made.
+      const standing = el("p", "field-hint");
+      standing.textContent =
+        `Horizon ships with this suspended by design: it is yours to switch on, not ours to assume. Doing so downloads a speech model (${status.alias}, about 700 MB) the first time you record. It is separate from the model that answers you, runs on this machine like everything else, and is released from memory when unused.`;
+      section.append(standing);
 
       const detail = el("div", "backup-detail");
       section.append(detail);
@@ -1749,10 +1758,6 @@ function renderDictationSetup(body) {
         limits.textContent =
           `A recording stops after ${Math.round(status.maxRecordingMs / 60000)} minutes, and the speech model is released after ${Math.round(status.idleTimeoutMs / 60000)} minutes unused. Speech recognition is English only.`;
         detail.append(limits);
-
-        const model = el("p", "field-hint");
-        model.textContent = `Speech model: ${status.alias}. It downloads on first use, and is separate from the model that answers you.`;
-        detail.append(model);
       };
       paint();
 
@@ -3463,11 +3468,23 @@ function dictationTime(ms) {
 function renderDictation() {
   const live = state.dictation.recording;
   const loading = state.dictation.modelState === "loading";
+  const off = !state.dictation.enabled;
+
   ui.dictationBar.hidden = !(live || loading);
-  ui.dictateBtn.hidden = !(state.dictation.available && state.dictation.enabled);
-  ui.dictateBtn.setAttribute("aria-pressed", live ? "true" : "false");
+
+  // The button is always present, even when dictation is switched off. Hiding
+  // it would mean nobody ever discovers the feature exists; showing it greyed
+  // out, with a tooltip that says where to switch it on, teaches it instead.
+  ui.dictateBtn.hidden = !state.dictation.available;
+  // Left clickable on purpose when switched off: a button that explains itself
+  // and takes you to the switch is more use than one that does nothing.
   ui.dictateBtn.disabled = loading;
-  ui.dictateBtn.title = live ? "Stop dictating" : (loading ? "Loading the speech model" : "Dictate");
+  ui.dictateBtn.setAttribute("aria-pressed", live ? "true" : "false");
+  ui.dictateBtn.setAttribute("aria-disabled", off ? "true" : "false");
+  ui.dictateBtn.classList.toggle("is-off", off);
+  ui.dictateBtn.title = off
+    ? "Dictation is off. Switch it on in Settings, under Behaviour."
+    : live ? "Stop dictating" : (loading ? "Loading the speech model" : "Dictate");
   ui.dictateIcon.firstElementChild.setAttribute("href", live ? "#i-mic-on" : "#i-mic");
 
   // The banner does double duty: it says the speech model is being loaded, and
@@ -3610,6 +3627,16 @@ async function dictationCall(action) {
 }
 
 async function toggleDictation() {
+  // Switched off: say so, and go to the switch rather than leaving the user to
+  // hunt for it.
+  if (!state.dictation.enabled) {
+    setNote("Dictation is off. Opening Settings so you can switch it on.");
+    setMode("settings");
+    settingsSection = "behaviour";
+    renderSettings();
+    return;
+  }
+
   try {
     if (state.dictation.recording) {
       await dictationCall("stop");
