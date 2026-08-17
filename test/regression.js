@@ -1053,3 +1053,35 @@ test("dictation: a failure never becomes transcript text", () => {
   assert.equal(session.recording, false,
     "a live microphone must not be shown for a session that never opened");
 });
+
+test("ui: the dictation setting says where the recording happens", () => {
+  const app = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
+
+  // Dictation was previously reachable only by hand-editing config.local.json,
+  // which is not a reasonable thing to ask of the people this is built for.
+  assert.match(app, /function renderDictationSetup/,
+    "dictation must be switchable from Settings, not only from a file");
+  assert.match(app, /renderDictationSetup\(panel\)/,
+    "and the panel must actually be rendered");
+
+  const panel = app.slice(app.indexOf("function renderDictationSetup"));
+  const body = panel.slice(0, panel.indexOf("\n/* ---"));
+
+  // The one thing nobody can work out by using it: the page never opens the
+  // microphone, so the browser shows no prompt and no recording dot.
+  assert.match(body, /does not record through this browser/i,
+    "the panel must say the browser is not doing the recording");
+  assert.match(body, /no permission prompt/i,
+    "and that no permission will be asked for");
+
+  // And the one thing that will otherwise waste someone's afternoon.
+  assert.match(body, /default input device/i,
+    "the panel must say Foundry uses the Windows default microphone");
+  assert.match(body, /cannot choose for you/i,
+    "and admit Horizon cannot change it");
+
+  // A machine without the terminal helper must be told why, not shown a
+  // control that cannot work.
+  assert.match(body, /if \(!status\.available\)/,
+    "an unavailable capability must explain itself instead of offering a switch");
+});

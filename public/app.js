@@ -1665,6 +1665,110 @@ function renderReaderSetup(body) {
   });
 }
 
+/* --- speaking instead of typing ------------------------------------------- */
+
+// Off until asked for: it opens the microphone and holds a second model in
+// memory. The panel is blunt about the part nobody can work out for
+// themselves, which is that the recording does not happen in the browser.
+function renderDictationSetup(body) {
+  const section = settingsCard(body, "Dictation",
+    "Speak instead of typing. Your voice never leaves this computer.");
+
+  const loading = el("p", "field-hint busy-dots", "Checking");
+  section.append(loading);
+
+  fetch("/api/dictation")
+    .then(response => response.json())
+    .then(status => {
+      loading.remove();
+
+      // Nothing can be switched on if the machine cannot run it, so the reason
+      // is shown instead of a control that would not work.
+      if (!status.available) {
+        const why = el("p", "field-hint");
+        why.append(icon("i-warn", "inline-glyph"), document.createTextNode(
+          " Dictation needs a terminal helper that is not installed here. Run npm install in the Horizon folder, then restart Horizon. Everything else works without it."));
+        section.append(why);
+        return;
+      }
+
+      const row = el("label", "setup-row");
+      const input = el("input");
+      input.type = "checkbox";
+      input.checked = Boolean(status.enabled);
+
+      const text = el("span", "setup-text");
+      text.append(
+        el("span", "setup-name", "Let Horizon listen when you ask it to"),
+        el("span", "setup-hint",
+          "A microphone button appears beside the message box. What you say is written there for you to read and correct, and nothing is sent until you send it.")
+      );
+      row.append(input, text);
+      section.append(row);
+
+      const detail = el("div", "backup-detail");
+      section.append(detail);
+
+      const paint = () => {
+        detail.textContent = "";
+        if (!input.checked) return;
+
+        // The part that cannot be discovered by using it: the page never opens
+        // the microphone, so the browser's own indicators stay silent.
+        const how = el("p", "field-hint is-warn");
+        how.append(icon("i-warn", "inline-glyph"), document.createTextNode(
+          " Horizon does not record through this browser. Foundry Local opens the microphone itself, so there is no permission prompt and no recording dot in the tab. Windows records the use against Foundry Local. Horizon shows its own red banner for as long as the microphone is open."));
+        detail.append(how);
+
+        detail.append(el("p", "field-hint",
+          "Foundry listens to whatever Windows has set as the default input device, and Horizon cannot choose for you. Change it in Settings, System, Sound if the wrong microphone is heard."));
+
+        const limits = el("p", "field-hint");
+        limits.textContent =
+          `A recording stops after ${Math.round(status.maxRecordingMs / 60000)} minutes, and the speech model is released after ${Math.round(status.idleTimeoutMs / 60000)} minutes unused. Speech recognition is English only.`;
+        detail.append(limits);
+
+        const model = el("p", "field-hint");
+        model.textContent = `Speech model: ${status.alias}. It downloads on first use, and is separate from the model that answers you.`;
+        detail.append(model);
+      };
+      paint();
+
+      input.addEventListener("change", async () => {
+        const wanted = input.checked;
+        input.disabled = true;
+        try {
+          const response = await fetch("/api/dictation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: wanted })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "That did not work.");
+
+          state.dictation.enabled = Boolean(result.enabled);
+          state.dictation.available = Boolean(result.available);
+          input.checked = state.dictation.enabled;
+          renderDictation();
+          if (state.dictation.enabled) openDictationStream();
+          paint();
+          setNote(state.dictation.enabled
+            ? "Dictation is on. The microphone button is beside the message box."
+            : "Dictation is off.");
+        } catch (error) {
+          input.checked = !wanted;
+          setNote(error.message, "error");
+        } finally {
+          input.disabled = false;
+        }
+      });
+    })
+    .catch(() => {
+      loading.remove();
+      section.append(el("p", "field-hint", "The dictation settings could not be read."));
+    });
+}
+
 /* --- keeping a copy on disk ----------------------------------------------- */
 
 // Off by default. Writing conversations to disk is a bigger commitment than
@@ -1927,6 +2031,10 @@ function renderBehaviourSettings(panel) {
 
   // Reading links is a behaviour of the model, not a storage concern.
   renderReaderSetup(panel);
+
+  // Dictation belongs here for the same reason: it changes how you talk to the
+  // model, and like reading links it reaches for something outside the page.
+  renderDictationSetup(panel);
 }
 
 /* --- storage -------------------------------------------------------------- */
