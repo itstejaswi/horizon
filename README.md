@@ -2,9 +2,28 @@
 
 # Horizon
 
-A private AI chat and model manager, powered by **Microsoft Foundry Local**. Start and stop the service, browse and load models, and chat with them — all from one page, all on your own hardware.
+A private, air-gapped AI workspace built on **Microsoft Foundry Local**. Chats, saved prompts, memory and a document library — with the runtime managed for you, not left to a terminal.
 
 Nothing you type is sent to the internet by Horizon. There is no account to create, no API key, no subscription, and no cloud service involved. Once your models are cached, the whole thing works with the network switched off — and the Connection panel shows you exactly what Horizon can and cannot vouch for.
+
+## Who this is for
+
+Not only developers. Horizon exists for anyone who wants an assistant that is *theirs*:
+
+- A student or researcher working with drafts they would rather not upload
+- A consultant, lawyer or clinician handling material that must not leave the building
+- Someone on a boat, a plane, a field site, or any connection they cannot rely on
+- Anyone who wants to experiment with a language model without an account, a subscription, a token budget, or a quota
+
+The goal is not to manage inference runtimes. The goal is to have somewhere to keep your chats, your prompts, your documents and your notes, with a model that answers from your own hardware. Foundry Local does the running; Horizon is the place you work.
+
+## Is this the right tool for you?
+
+Horizon **manages the Foundry Local service itself** rather than treating it as one backend among many. It starts and stops the service, downloads and loads models, re-discovers the port when Foundry restarts, and unloads the model to give you the memory back when you are done. That is the whole point of it.
+
+If you want a general-purpose front end that speaks to many providers — OpenAI, Anthropic, Ollama, Foundry Local and others behind one interface — then [Open WebUI](https://github.com/open-webui/open-webui) or [AnythingLLM](https://github.com/Mintplex-Labs/anything-llm) will serve you better. Both are mature, well supported, and have far more features than this does. Point them at Foundry Local's endpoint and they work.
+
+Choose Horizon if you want the opposite trade: one runtime, understood properly, with no Docker, no Electron, no account, and no runtime dependencies beyond Node.js.
 
 ## What you actually need
 
@@ -70,6 +89,30 @@ That does the same, but also starts Foundry and pre-loads your model so the firs
 Use the **power button** at the bottom of the left rail, or press `Ctrl+C` in the launcher window.
 
 This matters. A loaded model stays resident in the Foundry service — around 8.4 GB for phi-4 — and closing the browser tab alone will not release it. Closing safely unloads the model, optionally stops the Foundry service, and returns the memory. The browser will warn you if you try to close the tab while a model is still loaded.
+
+## The interface
+
+A left rail holds everything, in the way you would expect from a modern chat app.
+
+| Section | What it does |
+|---|---|
+| **Chats** | Every conversation, saved. Rename, delete, or clear the lot. |
+| **Prompts** | Reusable openings. Pick one and it lands in the message box ready to finish. |
+| **Memory** | Facts you want remembered across every chat, added to the model's instructions each time. Toggle it off whenever you like. |
+| **Library** | Replies you chose to keep, via **Save** under any answer. |
+| **Connection** | The health of every hop, plus the air-gap indicator. |
+| **Traffic** | What was sent and received, at a recording level you choose. |
+| **Settings** | Instructions, creativity, storage usage, and a single button to erase everything. |
+
+The model picker sits in the top bar. It lists every model on your machine with its hardware target and size; choosing one switches live, with no restart, keeping your conversation.
+
+Light, dark, and match-Windows themes are in the top right. Your choice is remembered.
+
+### Where your data lives
+
+Chats, prompts, memory and library entries are stored in **this browser's local storage on this machine**. They are never uploaded, and the Horizon server never sees them — it only receives the messages you actually send. Settings shows how much space they occupy, and **Erase all data** removes every trace.
+
+Clearing your browser's site data will also delete them, so treat them as convenience rather than an archive.
 
 ## Everyday use
 
@@ -275,30 +318,6 @@ command-line argument  >  environment variable  >  config.local.json  >  config.
 
 Create `config.local.json` for personal settings you do not want committed to source control. It is ignored by git and overlays `config.json`.
 
-## The interface
-
-A left rail holds everything, in the way you would expect from a modern chat app.
-
-| Section | What it does |
-|---|---|
-| **Chats** | Every conversation, saved. Rename, delete, or clear the lot. |
-| **Prompts** | Reusable openings. Pick one and it lands in the message box ready to finish. |
-| **Memory** | Facts you want remembered across every chat, added to the model's instructions each time. Toggle it off whenever you like. |
-| **Library** | Replies you chose to keep, via **Save** under any answer. |
-| **Connection** | The health of every hop, plus the air-gap indicator. |
-| **Traffic** | What was sent and received, at a recording level you choose. |
-| **Settings** | Instructions, creativity, storage usage, and a single button to erase everything. |
-
-The model picker sits in the top bar. It lists every model on your machine with its hardware target and size; choosing one switches live, with no restart, keeping your conversation.
-
-Light, dark, and match-Windows themes are in the top right. Your choice is remembered.
-
-### Where your data lives
-
-Chats, prompts, memory and library entries are stored in **this browser's local storage on this machine**. They are never uploaded, and the Horizon server never sees them — it only receives the messages you actually send. Settings shows how much space they occupy, and **Erase all data** removes every trace.
-
-Clearing your browser's site data will also delete them, so treat them as convenience rather than an archive.
-
 ## The control panel
 
 Click the panel icon in the top right. It has three tabs, and its purpose is to let you *verify* the privacy claim rather than take it on trust.
@@ -408,11 +427,13 @@ scripts/*.ps1             Setup, Start, Optimize, Test, Stop
 
 ## Credits
 
-Built on Microsoft Foundry Local.
+An independent front end for Microsoft Foundry Local.
 
 UI/UX connector designed by **Tejaswi**.
 
 Icons are from [Fluent System Icons](https://github.com/microsoft/fluentui-system-icons) (MIT). See `NOTICE`.
+
+Microsoft, Azure, Foundry and Foundry Local are trademarks of the Microsoft group of companies, used here only to name the software Horizon connects to. Horizon is not a Microsoft product and is not affiliated with or endorsed by Microsoft. Foundry Local is separate software with its own [licence and privacy terms](https://learn.microsoft.com/en-us/azure/foundry-local/).
 
 ## Interface notes
 
