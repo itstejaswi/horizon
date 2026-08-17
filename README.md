@@ -35,54 +35,92 @@ Choose Horizon if you want the opposite trade: one runtime, understood properly,
 
 ## Getting started
 
-Two one-time installs, then a double-click.
+No terminal knowledge needed. If you have never used one, follow **A**.
 
-**1. Install Foundry Local**
+### A. The simple way — download the ZIP
+
+**1. Install Foundry Local and Node.js**
+
+Open **PowerShell** from the Start menu (just type `powershell`), paste these two lines in, and press Enter after each. This is the only time you need it.
 
 ```powershell
 winget install Microsoft.FoundryLocal
-```
-
-**2. Install Node.js**, if you do not already have it
-
-```powershell
 winget install OpenJS.NodeJS.LTS
 ```
 
-**3. Double-click `Start Horizon.bat`**
+If `winget` is not recognised, download them by hand instead: [Foundry Local](https://learn.microsoft.com/en-us/azure/foundry-local/get-started) and [Node.js](https://nodejs.org) (choose the **LTS** version).
 
-That is the whole thing. It checks for Node.js, starts the local server, and opens the page at:
+**2. Download Horizon**
+
+On the [project page](https://github.com/itstejaswi/horizon), click the green **Code** button, then **Download ZIP**.
+
+**3. Unblock the ZIP before extracting**
+
+Windows marks files that come from the internet. Clearing the mark on the ZIP is one click, and saves you clearing it on every file afterwards.
+
+- Right-click the downloaded `horizon-main.zip`
+- Choose **Properties**
+- At the bottom of the **General** tab, tick **Unblock**
+- Click **OK**
+
+If you do not see an Unblock box, there is nothing to clear — carry on.
+
+**4. Extract it**
+
+Right-click the ZIP, choose **Extract All…**, and put it somewhere that belongs to you, such as:
+
+```text
+C:\Users\<your name>\Documents\horizon
+```
+
+Avoid `C:\Program Files` — Windows restricts writing there, and Horizon keeps its settings beside itself.
+
+**5. Double-click `Start Horizon.bat`**
+
+A small black window opens — that is the server, and it stays open while Horizon runs. Your browser opens at:
 
 ```text
 http://127.0.0.1:3000
 ```
 
-Everything after that is managed from the page itself — starting and stopping the Foundry service, downloading and removing models, switching between them, and changing settings. You should not need a terminal again.
+The first launch downloads the model, which is around 8.4 GB and takes a while. After that it works offline.
 
-### If you downloaded a ZIP
+> ⚠️ **Do not close the black window to quit.** That window *is* the server. Closing it kills Horizon mid-request and leaves the model — several gigabytes — sitting in memory. Use the **power button** at the bottom of the left rail instead: it unloads the model, optionally stops the Foundry service, and gives the memory back. `Ctrl+C` in that window does the same thing properly.
 
-Windows tags files that arrive from the internet, and will warn you before running them. Cloning the repository avoids this entirely:
+> If Windows shows **"Windows protected your PC"**, click **More info** then **Run anyway**. That warning appears for any file from the internet that is not commercially signed. Ticking Unblock in step 3 usually prevents it.
+
+### B. If you have Git
+
+Cloning avoids the unblock step entirely, because files created by Git are not tagged as coming from the internet.
 
 ```powershell
-git clone <repository-url>
+winget install Microsoft.FoundryLocal
+winget install OpenJS.NodeJS.LTS
+git clone https://github.com/itstejaswi/horizon
+cd horizon
+.\"Start Horizon.bat"
 ```
 
-If you downloaded a ZIP instead, clear the tag once after extracting:
+There is no `npm install` step. Horizon has no runtime dependencies.
+
+### Already extracted without unblocking?
+
+Clear the tag on everything at once:
 
 ```powershell
 cd path\to\horizon
 Get-ChildItem -Recurse | Unblock-File
 ```
 
-Then `Start Horizon.bat` runs without a warning. This is a Windows safety feature, not a fault in the download — it applies to anything obtained from the web.
-
-If you prefer PowerShell:
+### If you prefer PowerShell
 
 ```powershell
 .\scripts\Start-Horizon.ps1
 ```
 
-That does the same, but also starts Foundry and pre-loads your model so the first message is quick.
+Same thing, but it also starts Foundry and pre-loads your model so the first message is quick.
+
+Everything after that is managed from the page itself — starting and stopping the Foundry service, downloading and removing models, switching between them, and changing settings. You should not need a terminal again.
 
 ### Closing it properly
 
@@ -328,6 +366,10 @@ Shows the health of every hop in the chain — browser → local web server → 
 
 Above it sits the **air-gap indicator**. When your machine has no network, it says so plainly: nothing could leave this computer even if it tried. This is detected **passively** from the browser's own connectivity signal; Horizon never makes an outbound request to test for internet, because doing so would defeat the entire point.
 
+The same badge doubles as an **activity light**. Horizon reaches the internet for exactly one reason — fetching a page you asked it to read — and while that fetch is happening the badge turns amber, pulses, and names the host: *Reading example.com*. It works the way your operating system shows an indicator while the camera or microphone is live. Nothing leaves this machine without lighting it up.
+
+To be precise about what is happening: the **model** has no network access at all. Horizon fetches the page and hands the text over. The badge reports Horizon reaching out, not the model.
+
 Beneath it is a scope note: Horizon collects no telemetry and has no analytics, and it does not control Foundry Local or the model. The panel links to Microsoft's Foundry Local documentation so you can check how those handle the network yourself.
 
 ### Traffic
@@ -460,7 +502,7 @@ Microsoft, Azure, Foundry and Foundry Local are trademarks of the Microsoft grou
 - The conversation lives in the browser tab's memory and is never written to disk.
 - No analytics, telemetry, remote fonts, CDN assets, or third-party libraries. There are zero runtime dependencies; only Node.js built-in modules are used.
 
-> Foundry Local and its REST API are preview features. Review the Microsoft documentation before relying on this for production work.
+> Foundry Local and its REST API are preview features. Review the Microsoft documentation before relying on this for production workloads.
 
 ## Licence
 
