@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 
 const http = require("http");
 const fs = require("fs");
@@ -50,7 +50,7 @@ const state = {
   downloads: new Map(),
   // The dictation session and the pages listening to it. One session at a time:
   // there is only one microphone.
-  dictation: { session: null, listeners: new Set() }
+  dictation: { session: null, listeners: new Set(), recovering: false, recovered: false }
 };
 
 function securityHeaders(extra = {}) {
@@ -294,20 +294,80 @@ function dictationStatus() {
   };
 }
 
+// A session is torn down when the last page goes away, and the CLI takes a few
+// seconds to stop, exit, and let the daemon release the audio stream. A browser
+// refresh reconnects in about a second, so the new page would otherwise ask for
+// a session while the old one is still dying, and be told a stream is already
+// active — an error about an implementation detail, caused by nothing the user
+// did. Anything that wants a session waits for the teardown to finish instead.
+let dictationTeardown = null;
+
+async function dictationSessionAsync() {
+  if (dictationTeardown) {
+    try {
+      await dictationTeardown;
+    } catch {
+      // Teardown failing is not a reason to refuse a new session.
+    }
+  }
+  return dictationSession();
+}
+
 function dictationSession() {
   if (state.dictation.session) return state.dictation.session;
 
   const session = new dictation.DictationSession({
     alias: config.dictation.alias,
     maxRecordingMs: config.dictation.maxRecordingMs,
-    idleTimeoutMs: config.dictation.idleTimeoutMs
-  });
+    idleTimeoutMs: config.dictation.idleTimeoutMs  });
 
   session.on("ready", () => dictationBroadcast({ type: "ready" }));
   session.on("recording", () => dictationBroadcast({ type: "recording" }));
   session.on("text", payload => dictationBroadcast({ type: "text", ...payload }));
   session.on("stopped", payload => dictationBroadcast({ type: "stopped", ...payload }));
-  session.on("error", payload => dictationBroadcast({ type: "error", ...payload }));
+  session.on("error", payload => {
+    const stranded = /streaming session|holding a recording session/i.test(payload.message || "");
+    // Clearing a stranded stream and starting again is something Horizon can
+    // do on its own. It is attempted ONCE: if the stream is still held after
+    // that, retrying cannot help, and a loop would spawn a session every few
+    // seconds for as long as the page is left open.
+    if (stranded && !state.dictation.recovering && !state.dictation.recovered) {
+      state.dictation.recovering = true;
+      state.dictation.recovered = true;
+      const wanted = Boolean(session.wantedRecording);
+      dictationBroadcast({ type: "error", message: "Restarting Foundry to clear a recording session left open earlier. This takes a moment." });
+      // The stream is held until the CLI has actually exited, so the close is
+      // waited for rather than fired and forgotten. Unloading too early
+      // succeeds and releases nothing, which is what made this look unfixable.
+      const closing = state.dictation.session
+        ? state.dictation.session.close()
+        : Promise.resolve();
+      state.dictation.session = null;
+      Promise.resolve(closing)
+        .then(() => dictationClearStranded())
+        .then(() => {
+          state.dictation.recovering = false;
+          const next = dictationSession();
+          if (next && wanted) next.once("ready", () => next.record());
+        });
+      return;
+    }
+
+    if (stranded) {
+      // Already tried. Say so plainly rather than trying again for ever.
+      if (state.dictation.session) {
+        state.dictation.session.close();
+        state.dictation.session = null;
+      }
+      dictationBroadcast({
+        type: "error",
+        message: "Foundry would not release the recording session. Restarting Foundry Local from the Foundry panel will clear it."
+      });
+      return;
+    }
+
+    dictationBroadcast({ type: "error", ...payload });
+  });
   session.on("ended", payload => {
     state.dictation.session = null;
     dictationBroadcast({ type: "ended", ...payload });
@@ -336,6 +396,42 @@ async function dictationRelease() {
   } catch {
     // Nothing to do about it: the model is released when Foundry stops.
   }
+}
+
+// A session that ended without stopping leaves Foundry holding the audio
+// stream. Unloading the model does NOT release it: the unload reports success,
+// the model shows as unloaded, and the stream stays held. Restarting the
+// Foundry service is what clears it, which is why the CLI's own hint says so.
+//
+// Horizon manages that service already, so it can do this rather than telling
+// the user to run a command. It is a heavy remedy — the chat model is dropped
+// and has to be loaded again — so it happens once, only when a recording has
+// actually failed, and never speculatively.
+let dictationClearing = null;
+
+function dictationClearStranded() {
+  if (dictationClearing) return dictationClearing;
+  dictationClearing = foundry.restartServer(60000)
+    .then(async () => {
+      // The service came back on a new port, so readiness has to be
+      // re-established before anything else is asked of it.
+      state.statusCache = null;
+      state.warm = false;
+      state.loadedByUs.delete(config.dictation.alias);
+      try {
+        const endpoint = await foundry.discoverEndpoint(30000);
+        if (endpoint) state.baseUrl = endpoint;
+      } catch {
+        // probeFoundry will pick it up on the next status request.
+      }
+      return true;
+    })
+    .catch(() => false)
+    .then(result => {
+      dictationClearing = null;
+      return result;
+    });
+  return dictationClearing;
 }
 
 async function streamChat(req, res, body, truncated) {
@@ -793,7 +889,29 @@ const server = http.createServer((req, res) => {
       state.dictation.listeners.add(res);
       const session = state.dictation.session;
       sendSse(res, { type: "hello", ...dictationStatus() });
-      req.on("close", () => state.dictation.listeners.delete(res));
+      req.on("close", () => {
+        state.dictation.listeners.delete(res);
+        // Catch and release. The page is the only thing that shows the
+        // microphone is open, so when no page is watching there must be no
+        // session: a refresh, a closed tab and a closed browser all mean the
+        // same thing. Nothing is preserved across a reload, which is what kept
+        // the next recording fighting a stream that was still being released.
+        if (state.dictation.listeners.size) return;
+        setTimeout(() => {
+          if (state.dictation.listeners.size) return;
+          const current = state.dictation.session;
+          if (!current) return;
+          state.dictation.session = null;
+          // Recorded so that anything asking for a session waits for this to
+          // finish rather than racing it. close() stops the recording first and
+          // resolves once the CLI has really gone, so the daemon has released
+          // the stream before the next page asks for one.
+          dictationTeardown = Promise.resolve(current.close())
+            .then(() => dictationRelease())
+            .catch(() => {})
+            .then(() => { dictationTeardown = null; });
+        }, 1200);
+      });
       // Nothing further to send until the session says something; the
       // connection stays open for that.
       if (session && session.ready) sendSse(res, { type: "ready" });
@@ -974,7 +1092,7 @@ const server = http.createServer((req, res) => {
           }
 
           if (body.action === "start" || body.action === "record") {
-            const session = dictationSession();
+            const session = await dictationSessionAsync();
             if (!session) return sendJson(res, 500, { error: "The dictation session could not be started." });
             if (body.action === "record") {
               if (!session.ready) {
@@ -1258,6 +1376,7 @@ async function main() {
   console.log(`\n  Press Ctrl+C to stop.\n`);
 
   if (config.web.openBrowser) openInBrowser(url);
+
 
   if (config.foundry.warmUpOnStart && state.modelId) {
     warmUp().then(() => {

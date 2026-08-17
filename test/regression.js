@@ -988,3 +988,68 @@ test("dictation: stopping does not repeat what was said", () => {
   assert.equal(session.transcript(), "This is a test dictation that is working",
     "the finished transcript must contain what was said exactly once");
 });
+
+test("dictation: a stranded audio session is reported and cleared", () => {
+  const dictation = require(path.join(ROOT, "src", "dictation.js"));
+  const { DictationSession } = dictation;
+
+  // Foundry keeps the audio stream against the model, and the daemon outlives
+  // Horizon. A session that died without stopping leaves it held, and every
+  // later recording fails until something clears it. The user cannot see that
+  // and cannot act on it, so it must not surface as a bare failure.
+  const session = new DictationSession({ alias: "stub" });
+  const errors = [];
+  session.on("error", payload => errors.push(payload.message));
+  session._signals("error: A streaming session is already active (handle: audio-stream-123).");
+  assert.equal(errors.length, 1, "the page must be told what went wrong");
+  assert.match(errors[0], /holding a recording session/i,
+    "in words the user can act on, not with a daemon handle");
+
+  // Any other CLI error is passed on as it was written, rather than swallowed.
+  const other = new DictationSession({ alias: "stub" });
+  const seen = [];
+  other.on("error", payload => seen.push(payload.message));
+  other._signals("\u25a0 error: Model 'x' only supports live-streaming transcription.");
+  assert.equal(seen.length, 1, "other failures must reach the page too");
+  assert.match(seen[0], /only supports live-streaming/, "and keep the CLI's own wording");
+
+  // Unloading the model does NOT release the stream: it reports success, the
+  // model shows as unloaded, and the stream stays held. Only restarting the
+  // Foundry service clears it. The helper is kept because it is the right way
+  // to give the memory back, but it must not be mistaken for a way to release
+  // an audio session.
+  let called = null;
+  const fakeExec = (cmd, args, opts, cb) => { called = args; cb(null, "", ""); };
+  return dictation.releaseStrandedSession("stub-alias", fakeExec).then(() => {
+    assert.deepEqual(called, ["model", "unload", "stub-alias"],
+      "the helper unloads the model, which frees memory but NOT the audio stream");
+  });
+});
+
+test("dictation: a failure never becomes transcript text", () => {
+  const { DictationSession } = require(path.join(ROOT, "src", "dictation.js"));
+  const session = new DictationSession({ alias: "stub" });
+
+  const errors = [];
+  session.on("error", payload => errors.push(payload.message));
+  session.recording = true;
+  session._accepting = true;
+
+  // Exactly what Foundry printed when a session was left open by an earlier
+  // recording. Every line of this arrived on the same stream as the transcript
+  // and was typed into the user's message.
+  session._consume("\u001b[7;3H\u25cf error: IPC error 'op_handler_failed': Error starting audio stream session: Error: System.InvalidOperationException: A streaming session is already active (handle: audio-stream-7821b348).\n");
+  session._consume("   at Microsoft.AI.Foundry.Local.AudioStreamingSessionFactory.CreateSession(OnnxLoadedModel, AudioStreamingSettings) + 0x1d4\n");
+  session._consume("--- End of stack trace from previous location ---\n");
+  session._consume("Hint: Try 'foundry server stop' then 'foundry server start'.\n");
+
+  assert.equal(session.transcript(), "",
+    "a stack trace is not something anybody said, and must never reach the message box");
+  assert.ok(errors.length, "the failure must be reported instead");
+  assert.match(errors[0], /holding a recording session|clearing/i,
+    "and said in words the user can act on");
+
+  // A session that failed is not recording, however it looked a moment ago.
+  assert.equal(session.recording, false,
+    "a live microphone must not be shown for a session that never opened");
+});

@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 
 /*
  * Live dictation.
@@ -21,7 +21,7 @@
  */
 
 const { EventEmitter } = require("events");
-const { execFileSync } = require("child_process");
+const { execFile, execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -33,8 +33,7 @@ const PTY_COLUMNS = 4000;
 const PTY_ROWS = 30;
 
 // Lines the CLI prints to decorate its own prompt. None of them are speech.
-const CHROME = [
-  /^[─━—\-]{4,}$/,
+const CHROME = [  /^[\u2500\u2501\u2014\-]{4,}$/,
   /note:/i,
   /Transcribing model/i,
   /Type \/help/i,
@@ -44,7 +43,16 @@ const CHROME = [
   /^\/(record|stop|exit)\b/,
   // The model name, printed under the heading when the session opens.
   /^\([a-z0-9][a-z0-9._-]*\)$/i,
-  /^[❯>■\s]*$/
+  /^[\u276f>\u25a0\s]*$/,
+  // Failures and their stack traces. These arrive on the same stream as the
+  // transcript, and without this they are typed into the user's message: a
+  // .NET exception is not something anybody said.  /^[\s\u25a0\u25cf]*error:/i,
+  /^\s*at\s+[\w.<>+`]/,
+  /^-{3,}\s*End of stack trace/i,
+  /^\s*Hint:/i,
+  /System\.[A-Za-z]+Exception/,
+  /IPC error/i,
+  /^\s*\+\s*0x[0-9a-f]+/i
 ];
 
 // A command is typed a character at a time and echoed back, so the leading edge
@@ -152,6 +160,10 @@ function isChrome(line) {
 class DictationSession extends EventEmitter {
   constructor(options = {}) {
     super();
+    // An EventEmitter throws if an "error" event is emitted with nothing
+    // listening. Dictation is optional and must never be able to bring the
+    // server down, so a listener is always present.
+    this.on("error", () => {});
     this.alias = options.alias;
     this.command = options.command || null;
     this.maxRecordingMs = options.maxRecordingMs || 300000;
@@ -166,11 +178,18 @@ class DictationSession extends EventEmitter {
 
     this._recordingTimer = null;
     this._idleTimer = null;
+    this._readyTimer = null;
+    this._sawPrompt = false;
+    // How long the CLI must stay quiet after printing its prompt before the
+    // session is treated as ready. Loading the speech model takes seconds and
+    // writes as it goes, so silence is the signal that it has finished.
+    this.readyQuietMs = options.readyQuietMs || 2500;
     this._pending = "";
     // Speech only counts between /record and /stop. The CLI redraws its last
     // line again after stopping, and treating that as new text made the
     // finished transcript repeat itself.
     this._accepting = true;
+    this._failed = false;
   }
 
   get state() {
@@ -282,21 +301,64 @@ class DictationSession extends EventEmitter {
   }
 
   _signals(text) {
+    // "Type /record to start recording" is printed as soon as the banner is
+    // drawn, long before the speech model has finished loading. Treating that
+    // as readiness meant Horizon sent /record within milliseconds of launch,
+    // and the CLI failed to open an audio stream because it was not armed yet.
+    //
+    // Loading finishes when the CLI stops writing, so readiness is taken from
+    // the output going quiet rather than from the words appearing. Every chunk
+    // pushes the moment back; when nothing has arrived for a short while, the
+    // session is genuinely waiting for a command.
     if (!this.ready && /Press space bar|Type \/record/i.test(text)) {
-      this.ready = true;
-      this.emit("ready");
+      this._sawPrompt = true;
+    }
+    if (this._sawPrompt && !this.ready) {
+      clearTimeout(this._readyTimer);
+      this._readyTimer = setTimeout(() => {
+        if (this.ready) return;
+        this.ready = true;
+        this.emit("ready");
+      }, this.readyQuietMs);
+      if (typeof this._readyTimer.unref === "function") this._readyTimer.unref();
     }
     if (!this.recording && /Recording\.\.\./i.test(text)) {
       this.recording = true;
       this.startedAt = Date.now();
       this.emit("recording");
     }
+    // The CLI reports its own failures on the same stream. Passing them on is
+    // better than leaving the page waiting for a session that will not arrive.
+    if (/streaming session is already active/i.test(text)) {
+      this._fail("Foundry is still holding a recording session from earlier.");
+    } else if (/IPC error|System\.[A-Za-z]+Exception/.test(text)) {
+      this._fail("The speech model could not start a recording.");    } else if (/^[\s\u25a0\u25cf]*error:/im.test(text)) {
+      const line = text.split("\n").find(part => /error:/i.test(part)) || "";      const detail = line.replace(/^[\s\u25a0\u25cf]*error:\s*/i, "").trim();
+      if (detail) this._fail(detail);
+    }
+  }
+
+  // A failure ends the recording. Leaving `recording` set showed a live
+  // microphone banner and a running timer for a session that never opened.
+  _fail(message) {
+    if (this._failed) return;
+    this._failed = true;
+    this.recording = false;
+    this._accepting = false;
+    // Nothing said before a failure is worth keeping: the transcript at this
+    // point is the error itself.
+    this.committed = [];
+    this.active = "";
+    this._pending = "";
+    clearTimeout(this._recordingTimer);
+    this.emit("text", { committed: [], active: "" });
+    this.emit("error", { message });
   }
 
   _line(raw, redrawing = false) {
     // The echo of a command being typed is not speech, so it is trimmed from
     // the end before the line is considered.
-    const line = raw.replace(/^[❯>■\s]+/, "").replace(COMMAND_ECHO, "").trimEnd();
+    const line = raw.replace(/^[\u276f>\u25a0\s]+/, "").replace(COMMAND_ECHO, "").trimEnd();
     this._signals(raw);
     if (!line || isChrome(line)) return;
     // Anything drawn after recording stopped is the CLI repainting what it
@@ -323,6 +385,9 @@ class DictationSession extends EventEmitter {
 
   record() {
     if (!this.term || !this.ready || this.recording) return false;
+    // Remembered so a session that has to be restarted can resume what was
+    // asked for, rather than making the user press record again.
+    this.wantedRecording = true;
     this.committed = [];
     this.active = "";
     this._pending = "";
@@ -377,25 +442,83 @@ class DictationSession extends EventEmitter {
   _clearTimers() {
     clearTimeout(this._recordingTimer);
     clearTimeout(this._idleTimer);
+    clearTimeout(this._readyTimer);
   }
 
   close() {
     this._clearTimers();
-    if (!this.term) return;
-    try {
-      this.term.write("/exit\r");
-    } catch {
-      // The process may already be gone; the kill below is the fallback.
-    }
+    if (!this.term) return Promise.resolve();
     const term = this.term;
-    setTimeout(() => {
+    const wasRecording = this.recording;
+    this.recording = false;
+    this.term = null;
+
+    // Resolves once the process is really gone. Callers that need the audio
+    // stream released — anything about to unload the model — have to wait for
+    // this, because the stream is held until the CLI exits.
+    return new Promise(resolve => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+
       try {
-        term.kill();
+        term.onExit(finish);
       } catch {
-        // Already exited.
+        // Older builds may not expose it; the timeout below covers that.
       }
-    }, 600);
+
+      try {
+        // Stopping and exiting are two separate things to the CLI, and exiting
+        // while a recording is live leaves the daemon holding the stream for
+        // the next session to trip over.
+        if (wasRecording) term.write("/stop\r");
+      } catch {
+        return finish();
+      }
+
+      setTimeout(() => {
+        try {
+          term.write("/exit\r");
+        } catch {
+          return finish();
+        }
+        setTimeout(() => {
+          try {
+            term.kill();
+          } catch {
+            // Already exited.
+          }
+          // Give the daemon a moment to notice the process has gone.
+          setTimeout(finish, 700);
+        }, 900);
+      }, wasRecording ? 800 : 0);
+    });
   }
+}
+
+/*
+ * Releasing a stranded audio session.
+ *
+ * Foundry keeps a streaming session open against the speech model, and that
+ * session belongs to the daemon rather than to Horizon. If the CLI dies without
+ * being asked to stop — the machine was shut down, the server was killed, a
+ * window was closed — the session stays open, and every later attempt fails
+ * with "a streaming session is already active". The daemon outlives Horizon, so
+ * restarting Horizon alone does not clear it.
+ *
+ * Unloading the model releases the session with it, which is the same thing
+ * Horizon already does to give memory back.
+ */
+function releaseStrandedSession(alias, execFileImpl = execFile) {
+  return new Promise(resolve => {
+    const command = resolveCommand();
+    if (!command || !alias) return resolve(false);
+    execFileImpl(command, ["model", "unload", alias], { timeout: 30000, windowsHide: true },
+      error => resolve(!error));
+  });
 }
 
 // Whether live dictation can run on this machine at all, so the page can say so
@@ -411,4 +534,12 @@ function capability() {
   return { available: true, reason: null };
 }
 
-module.exports = { DictationSession, capability, resolveCommand, stripAnsi, isChrome, PTY_COLUMNS };
+module.exports = {
+  DictationSession,
+  capability,
+  resolveCommand,
+  releaseStrandedSession,
+  stripAnsi,
+  isChrome,
+  PTY_COLUMNS
+};
