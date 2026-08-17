@@ -203,11 +203,48 @@ foundry server stop
 4. Send another message. It should still answer.
 5. Confirm every address printed uses `127.0.0.1`.
 
+## The microphone button is missing
+
+Dictation is off until you ask for it. Add this to `config.local.json` and restart Horizon:
+
+```json
+{ "dictation": { "enabled": true } }
+```
+
+If it is switched on and the button still does not appear, the terminal helper it needs is not installed. Run `npm install` in the Horizon folder. Chat is unaffected either way — Horizon says on the page why dictation is unavailable rather than offering a button that cannot work.
+
+## Dictation hears nothing, or hears the wrong microphone
+
+Foundry records through **whatever Windows has set as the default input device**, and Horizon cannot choose for you. The page never opens the microphone itself, so it has no microphone picker: offering a list it could not honour would be a lie.
+
+Set the device you want in **Settings → System → Sound → Input**, then start the recording again. Two things worth checking while you are there: some headsets have an inline mute switch that Windows reports as a working device, and a far-field laptop array will hear you far more faintly than a headset boom.
+
+Your browser's microphone permission has nothing to do with this. Dictation works whether or not the page has been granted access, and works in a private window, because the recording is not happening in the browser.
+
+## "Foundry is still holding a recording session from earlier"
+
+Foundry keeps an audio stream open while recording, and that stream belongs to the Foundry service rather than to Horizon. If a recording ends abruptly — the machine was shut down, the process was killed — the stream can be left held, and the next recording is refused.
+
+Horizon restarts the Foundry service once to clear it, and says so while it happens. The chat model is dropped with it and has to load again, which is why it is only done after a recording has actually failed.
+
+If it happens repeatedly, clear it by hand:
+
+```powershell
+foundry server restart
+```
+
+Unloading the speech model does **not** release the stream, even though the command reports success.
+
+## Dictation writes into the message box, not the conversation
+
+That is deliberate. Speech is an input method, so it goes where the cursor is: you can read it, correct it, and decide whether to send it. Nothing is sent until you send it.
+
 ## Useful commands
 
 ```powershell
 foundry --version              # is Foundry installed
 foundry server status          # is the service running, and where
+foundry server restart         # clear a recording session left open
 foundry model list             # what models exist
 foundry model list --cached    # what is downloaded to this machine
 foundry model list --loaded    # what is currently in memory

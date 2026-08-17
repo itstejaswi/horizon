@@ -90,6 +90,22 @@ The first launch downloads the model, which is around 8.4 GB and takes a while. 
 
 > If Windows shows **"Windows protected your PC"**, click **More info** then **Run anyway**. That warning appears for any file from the internet that is not commercially signed. Ticking Unblock in step 3 usually prevents it.
 
+**6. Optional: turn on dictation**
+
+Skip this unless you want to speak instead of type. In the Horizon folder, hold **Shift**, right-click an empty space, choose **Open PowerShell window here**, and run:
+
+```powershell
+npm install
+```
+
+Then open `config.local.json` in Notepad and add:
+
+```json
+{ "dictation": { "enabled": true } }
+```
+
+Restart Horizon and a microphone button appears beside the message box. If `npm install` fails, nothing is broken: Horizon runs exactly as before and simply says why dictation is unavailable.
+
 ### B. If you have Git
 
 Cloning avoids the unblock step entirely, because files created by Git are not tagged as coming from the internet.
@@ -121,7 +137,19 @@ Dictation is switched off until you ask for it, because it opens the microphone 
 
 The first recording downloads a speech model (about 700 MB) and loads it, which takes a moment. Horizon says so while it happens.
 
-**Worth knowing before you use it:** Horizon does not record through your browser. It asks Foundry Local to open the microphone directly, so your browser shows no permission prompt and no recording indicator in the tab — Windows attributes the microphone to *Foundry Local CLI*, not to your browser. Horizon shows its own red banner for as long as the microphone is open, and that banner is the only signal the page can give you.
+**Worth knowing before you use it:** Horizon does not record through your browser. The page never asks for the microphone, so there is no permission prompt and no recording indicator in the tab. Instead the server runs Foundry Local's own command line tool through a pseudo terminal — a native channel, outside the browser entirely — and that process opens the microphone. Windows attributes it to *Foundry Local CLI* rather than to your browser, which is why the browser's own indicators stay silent: as far as it is concerned, nothing is being recorded.
+
+That is also why Horizon shows its own red banner for as long as the microphone is open. It is the only signal the page can give you, so it is deliberately hard to miss.
+
+That has three consequences worth knowing before you rely on it:
+
+- **Foundry uses whatever Windows has set as the default input device**, and Horizon cannot choose for you. There is no microphone picker, because the page never opens the microphone and a list it could not honour would be a lie. If your words are not being heard, change the default input in *Settings → System → Sound* and start the recording again.
+- **Browser microphone permission is irrelevant.** Dictation works whether or not the page has been granted access, and works in a private window. The controls that apply are the Windows ones.
+- **A recording stops when the page goes away.** Closing the tab, closing the browser or refreshing all end the session, so a recording cannot outlive the only thing showing that it is running.
+
+Two limits are fixed rather than configurable: a single recording stops after five minutes, and an unused speech model is released after five minutes of inactivity. Both are there so a forgotten session cannot hold the microphone open or keep a model in memory.
+
+Speech recognition is **English only**. Foundry ships one streaming model per language, and Horizon uses the English one.
 
 ### Already extracted without unblocking?
 

@@ -232,6 +232,14 @@
            machine. While it happens the badge turns amber and names the host — the way
            your operating system shows an indicator while the camera is live.</p>
       </div>
+      <div class="card">
+        <h3>Dictation says so too</h3>
+        <p>Speaking instead of typing is optional and off until you ask for it. When it
+           runs, the recording happens in Foundry Local&rsquo;s own process rather than in the
+           page, so your browser shows no permission prompt and no indicator in the tab.
+           Horizon shows its own, for as long as the microphone is open. Windows records
+           the use against <em>Foundry Local CLI</em>, and your voice never leaves the machine.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -419,7 +427,7 @@ winget install OpenJS.NodeJS.LTS</pre>
             <pre>git clone https://github.com/itstejaswi/horizon
 cd horizon
 .\"Start Horizon.bat"</pre>
-            <p class="note">No <code>npm install</code>. Horizon has no runtime dependencies.</p>
+            <p class="note">No <code>npm install</code> to chat with a model &mdash; Horizon&rsquo;s core has no runtime dependencies. Dictation is the one exception: it needs a terminal helper, installed with <code>npm install</code>, and Horizon runs without it.</p>
           </div>
         </div>
 
