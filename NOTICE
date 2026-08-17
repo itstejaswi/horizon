@@ -22,14 +22,23 @@ and privacy terms:
     https://learn.microsoft.com/en-us/azure/foundry-local/
 
 Microsoft, Azure, Foundry and Foundry Local are trademarks of the Microsoft
-group of companies. Horizon uses these names only to identify the software
-it connects to.
+group of companies. Node.js is a trademark of the OpenJS Foundation. Horizon
+uses these names, and their marks where a link points at their own download
+page, only to identify the software it connects to and to show where a link
+leads. All such trademarks and logos remain the property of their respective
+owners. The sites and downloads they point to are controlled by those owners
+and not by Horizon.
 
-No Microsoft product artwork is distributed with Horizon. Where the About
-page shows the Foundry Local icon, that image is read at runtime from the
-copy installed on the user's own machine (src/brand.js) and remains
-Microsoft's property. If Foundry Local is not installed, Horizon falls back
-to its own original glyph and no Microsoft artwork is shown.
+No Microsoft product artwork is distributed inside the Horizon application.
+Where the About page shows the Foundry Local icon, that image is read at
+runtime from the copy installed on the user's own machine (src/brand.js) and
+remains Microsoft's property. If Foundry Local is not installed, Horizon falls
+back to its own original glyph and no Microsoft artwork is shown.
+
+The project website under docs/ is a static page with no runtime, so it cannot
+read anything from a visitor's machine. Where it shows a third-party mark
+beside a download link, that mark is a simplified rendering used to identify
+the destination, and is not a claim of affiliation or endorsement.
 
 Models downloaded through Foundry Local carry their own licences, shown
 in the model catalogue under Settings.

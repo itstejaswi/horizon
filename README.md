@@ -2,7 +2,7 @@
 
 # Horizon
 
-A private, air-gapped AI workspace built on **Microsoft Foundry Local**. Chats, saved prompts, memory and a document library — with the runtime managed for you, not left to a terminal.
+A private, air-gapped AI workspace built for **Microsoft Foundry Local**. Chats, saved prompts, memory and a document library — with the runtime managed for you, not left to a terminal.
 
 Nothing you type is sent to the internet by Horizon. There is no account to create, no API key, no subscription, and no cloud service involved. Once your models are cached, the whole thing works with the network switched off — and the Connection panel shows you exactly what Horizon can and cannot vouch for.
 

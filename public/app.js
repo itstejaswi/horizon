@@ -1047,6 +1047,28 @@ function renderAbout() {
   covenant.append(risks);
   grid.append(covenant);
 
+  // Dictation deserves its own note here rather than a line in a settings
+  // panel. It opens a microphone in a way the browser cannot show you, and
+  // somebody reading this page to decide whether to trust Horizon should be
+  // told that plainly rather than discover it.
+  const speech = el("div", "help-card is-wide");
+  speech.append(el("span", "help-card-title", "If you speak to it instead of typing"));
+  speech.append(el("p", "help-line",
+    "Dictation is optional and off until you switch it on. When it runs, this is what happens:"));
+
+  const speechNotes = el("ul", "help-list");
+  for (const note of [
+    "Your voice stays on this computer. It goes to a speech model running here, and is never sent anywhere.",
+    "The recording does not happen in this browser. Foundry Local opens the microphone itself, so there is no permission prompt and no recording indicator in the tab, and Windows records the use against Foundry Local rather than your browser.",
+    "Horizon shows a red banner for as long as the microphone is open. That banner is the only signal this page can give you, which is why it is hard to miss.",
+    "Foundry listens to whatever Windows has set as the default input device. Horizon cannot choose it for you, and does not offer a list it could not honour.",
+    "What you say is written into the message box for you to read and correct. Nothing is sent until you send it."
+  ]) {
+    speechNotes.append(el("li", null, note));
+  }
+  speech.append(speechNotes);
+  grid.append(speech);
+
   /* --- who made what ---------------------------------------------------- */
 
   // Named plainly rather than in fine print: Horizon is not a Microsoft
