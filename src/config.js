@@ -135,11 +135,40 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
       // text to the model instead of letting it guess from the address.
       enabled: toBool(firstDefined(env.HORIZON_READ_LINKS, file.reader?.enabled), false),
       maxChars: toInt(firstDefined(env.HORIZON_READ_MAX_CHARS, file.reader?.maxChars), 12000)
+    },
+    dictation: {
+      // Speaking instead of typing. Off unless asked for, because it opens the
+      // microphone and holds a second model in memory.
+      enabled: toBool(firstDefined(env.HORIZON_DICTATION, file.dictation?.enabled), false),
+      alias: firstDefined(env.HORIZON_DICTATION_MODEL, file.dictation?.alias, "nemotron-speech-streaming-en-0.6b"),
+      // A recording that is never stopped would hold the microphone open for as
+      // long as the page is left alone, so there is an upper bound on one take.
+      maxRecordingMs: toInt(firstDefined(env.HORIZON_DICTATION_MAX_MS, file.dictation?.maxRecordingMs), 300000),
+      // How long an unused session stays loaded before it releases the model.
+      idleTimeoutMs: toInt(firstDefined(env.HORIZON_DICTATION_IDLE_MS, file.dictation?.idleTimeoutMs), 300000)
     }
   };
 
   if (config.web.port < 0 || config.web.port > 65535) {
     throw new Error(`Invalid web port: ${config.web.port}. Use 0 for an automatically assigned port.`);
+  }
+
+  // The alias reaches the Foundry command line, so it is checked here rather
+  // than trusted from a file that a user may have edited by hand.
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(config.dictation.alias)) {
+    throw new Error(`Invalid dictation model alias: ${config.dictation.alias}`);
+  }
+
+  // One minute is long enough to be useful; thirty is long enough that the user
+  // has clearly chosen it. Outside that range the value is almost certainly a
+  // mistake, and a wrong value here means a microphone left open.
+  const idleMs = config.dictation.idleTimeoutMs;
+  if (idleMs < 60000 || idleMs > 1800000) {
+    throw new Error(`Invalid dictation idle timeout: ${idleMs} ms. Use 60000 to 1800000 (1 to 30 minutes).`);
+  }
+
+  if (config.dictation.maxRecordingMs < 5000 || config.dictation.maxRecordingMs > 1800000) {
+    throw new Error(`Invalid dictation recording limit: ${config.dictation.maxRecordingMs} ms. Use 5000 to 1800000.`);
   }
 
   return config;

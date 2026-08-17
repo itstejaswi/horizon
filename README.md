@@ -23,7 +23,7 @@ Horizon **manages the Foundry Local service itself** rather than treating it as 
 
 If you want a general-purpose front end that speaks to many providers — OpenAI, Anthropic, Ollama, Foundry Local and others behind one interface — then [Open WebUI](https://github.com/open-webui/open-webui) or [AnythingLLM](https://github.com/Mintplex-Labs/anything-llm) will serve you better. Both are mature, well supported, and have far more features than this does. Point them at Foundry Local's endpoint and they work.
 
-Choose Horizon if you want the opposite trade: one runtime, understood properly, with no Docker, no Electron, no account, and no runtime dependencies beyond Node.js.
+Choose Horizon if you want the opposite trade: one runtime, understood properly, with no Docker, no Electron, no account, and nothing to install beyond Node.js to run it.
 
 ## What you actually need
 
@@ -32,6 +32,7 @@ Choose Horizon if you want the opposite trade: one runtime, understood properly,
 - Node.js 18 or later
 - Roughly 10 GB of free disk space for the model and its supporting files
 - Internet access **for the one-time setup only**
+- A microphone, only if you want to dictate. That is optional and off by default.
 
 ## Getting started
 
@@ -101,7 +102,26 @@ cd horizon
 .\"Start Horizon.bat"
 ```
 
-There is no `npm install` step. Horizon has no runtime dependencies.
+There is no `npm install` step to chat with a model. Horizon's core has no runtime dependencies.
+
+Dictation is the one exception. Speaking instead of typing needs a terminal helper that Node does not provide, so it is an *optional* dependency:
+
+```powershell
+cd path\to\horizon
+npm install
+```
+
+If that fails, or you skip it, Horizon still runs and chat is unaffected — the microphone button simply does not appear, and the page says why. Prebuilt helpers ship for Windows and macOS; on Linux `npm install` will try to build it, which needs a compiler.
+
+Dictation is switched off until you ask for it, because it opens the microphone and holds a second model in memory. Turn it on in `config.local.json`:
+
+```json
+{ "dictation": { "enabled": true } }
+```
+
+The first recording downloads a speech model (about 700 MB) and loads it, which takes a moment. Horizon says so while it happens.
+
+**Worth knowing before you use it:** Horizon does not record through your browser. It asks Foundry Local to open the microphone directly, so your browser shows no permission prompt and no recording indicator in the tab — Windows attributes the microphone to *Foundry Local CLI*, not to your browser. Horizon shows its own red banner for as long as the microphone is open, and that banner is the only signal the page can give you.
 
 ### Already extracted without unblocking?
 

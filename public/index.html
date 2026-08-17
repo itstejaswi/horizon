@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
@@ -60,6 +60,23 @@
           fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
     <rect x="2.4" y="2.9" width="4.2" height="8.7" rx="1.2"
           fill="none" stroke="currentColor" stroke-width="1.6"/>
+  </symbol>
+  <!-- Dictation. Drawn here rather than taken from the icon set, for the same
+       reason as the glyphs above: the build has to work without the Fluent
+       package present. Same 20px grid and 1.6 stroke weight. The filled
+       version marks the recording state, where an outline is too quiet: the
+       browser shows no recording indicator of its own for this, because the
+       Foundry CLI opens the microphone rather than the page. -->
+  <symbol id="i-mic" viewBox="0 0 20 20">
+    <rect x="7.6" y="2.4" width="4.8" height="9.2" rx="2.4"
+          fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <path d="M4.9 9.6a5.1 5.1 0 0 0 10.2 0M10 14.7v2.9"
+          fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-mic-on" viewBox="0 0 20 20">
+    <rect x="7.6" y="2.4" width="4.8" height="9.2" rx="2.4" fill="currentColor"/>
+    <path d="M4.9 9.6a5.1 5.1 0 0 0 10.2 0M10 14.7v2.9"
+          fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
   </symbol>
   <!-- A fallback glyph for the Foundry section, used only when Microsoft's own
        icon cannot be read from the local install (Foundry not installed, or the
@@ -281,12 +298,28 @@
         <span id="url-warning-text">The model can't open links. It guesses from the address, so details may be invented. Paste the text or attach the page instead.</span>
       </div>
 
+      <!-- Shown only while a recording is running. The tab shows no recording
+           indicator of its own, because the page never opens the microphone:
+           the Foundry CLI does. This banner is therefore the only thing
+           telling the user they are being listened to, and it is deliberately
+           impossible to miss. -->
+      <div class="dictation-bar" id="dictation-bar" hidden role="status" aria-live="assertive">
+        <span class="dictation-dot" id="dictation-dot" aria-hidden="true"></span>
+        <span id="dictation-status">Listening. Horizon is recording through <span id="dictation-source">your system microphone</span>.</span>
+        <span class="dictation-timer" id="dictation-timer">0:00</span>
+        <button class="btn-subtle" id="dictation-stop" type="button">Stop</button>
+      </div>
+
       <div class="composer" id="composer">
         <button class="btn-attach" id="prompt-library" type="button" title="Insert a saved prompt" aria-label="Insert a saved prompt">
           <svg><use href="#i-bookmark"/></svg>
         </button>
         <button class="btn-attach" id="attach-btn" type="button" title="Attach a text file" aria-label="Attach a text file">
           <svg><use href="#i-plus"/></svg>
+        </button>
+        <button class="btn-attach btn-dictate" id="dictate-btn" type="button" hidden
+                title="Dictate" aria-label="Dictate" aria-pressed="false">
+          <svg id="dictate-icon"><use href="#i-mic"/></svg>
         </button>
         <input type="file" id="attach-input" multiple hidden
                accept=".txt,.md,.markdown,.csv,.tsv,.json,.xml,.yml,.yaml,.log,.js,.ts,.jsx,.tsx,.py,.rb,.go,.rs,.java,.cs,.c,.h,.cpp,.sql,.sh,.ps1,.bat,.ini,.cfg,.conf,.html,.css">
@@ -354,3 +387,4 @@
 <script src="/app.js"></script>
 </body>
 </html>
+

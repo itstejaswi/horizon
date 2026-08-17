@@ -17,6 +17,9 @@ const ui = {
   urlWarning: $("url-warning"), urlWarningText: $("url-warning-text"),
   attachBtn: $("attach-btn"), attachInput: $("attach-input"),
   pickerLabel: $("picker-label"), pickerDot: $("picker-dot"),
+  dictateBtn: $("dictate-btn"), dictateIcon: $("dictate-icon"),
+  dictationBar: $("dictation-bar"), dictationStatus: $("dictation-status"),
+  dictationTimer: $("dictation-timer"), dictationStop: $("dictation-stop"),
   airgapBadge: $("airgap-badge"), airgapText: $("airgap-text"), airgapGlyph: $("airgap-glyph")
 };
 
@@ -39,7 +42,11 @@ const state = {
   // Files staged for the next message. Never uploaded anywhere: the text is
   // read in the browser and folded into the message itself.
   attachments: [],
-  limits: null
+  limits: null,
+  // Live dictation. The transcript arrives from the server as it is spoken;
+  // `base` is whatever was already typed, so speech is added to it rather than
+  // replacing the user's own text.
+  dictation: { available: false, enabled: false, recording: false, stream: null, base: "", startedAt: 0, timer: null, settled: false, modelState: "idle" }
 };
 
 const LOG_CAP = 20;
@@ -3302,6 +3309,219 @@ document.addEventListener("keydown", event => {
   }
 });
 
+/* ============================================================ dictation === */
+
+/*
+ * Speaking instead of typing.
+ *
+ * The page never opens the microphone. Horizon asks the server to run the
+ * Foundry CLI, which opens it instead, and the transcript comes back over an
+ * event stream. That is why there is no permission prompt and no recording
+ * indicator in the tab: as far as the browser is concerned nothing is being
+ * recorded. The banner in the composer is the only signal the user gets, so it
+ * is shown for as long as the microphone is open and never suppressed.
+ *
+ * For the same reason there is no microphone picker here. The choice belongs to
+ * Windows, and offering a list the page cannot honour would be a lie.
+ */
+
+function dictationTime(ms) {
+  const total = Math.floor(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function renderDictation() {
+  const live = state.dictation.recording;
+  const loading = state.dictation.modelState === "loading";
+  ui.dictationBar.hidden = !(live || loading);
+  ui.dictateBtn.hidden = !(state.dictation.available && state.dictation.enabled);
+  ui.dictateBtn.setAttribute("aria-pressed", live ? "true" : "false");
+  ui.dictateBtn.disabled = loading;
+  ui.dictateBtn.title = live ? "Stop dictating" : (loading ? "Loading the speech model" : "Dictate");
+  ui.dictateIcon.firstElementChild.setAttribute("href", live ? "#i-mic-on" : "#i-mic");
+
+  // The banner does double duty: it says the speech model is being loaded, and
+  // then that the microphone is open. Pressing record and waiting with no
+  // explanation was indistinguishable from nothing happening.
+  if (loading) {
+    ui.dictationBar.dataset.mode = "loading";
+    ui.dictationStatus.textContent = "Loading the speech model. This happens once, and takes a moment.";
+    ui.dictationTimer.hidden = true;
+    ui.dictationStop.hidden = true;
+  } else {
+    ui.dictationBar.dataset.mode = "recording";
+    ui.dictationStatus.textContent = "Listening. Horizon is recording through your system microphone.";
+    ui.dictationTimer.hidden = false;
+    ui.dictationStop.hidden = false;
+  }
+}
+
+function dictationTick() {
+  ui.dictationTimer.textContent = dictationTime(Date.now() - state.dictation.startedAt);
+}
+
+// The transcript replaces only the spoken part, so anything typed before
+// dictation started is kept and speech is appended to it.
+function applyTranscript(text) {
+  const spoken = String(text || "").trim();
+  const base = state.dictation.base;
+  ui.prompt.value = base && spoken ? `${base} ${spoken}` : base || spoken;
+  // The same work the composer does when text is typed, so a dictated address
+  // raises the link warning exactly as a pasted one would.
+  autoGrow();
+  updateUrlWarning();
+}
+
+function openDictationStream() {
+  if (state.dictation.stream) return;
+  const stream = new EventSource("/api/dictation/events");
+  state.dictation.stream = stream;
+
+  stream.onmessage = event => {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+
+    if (message.type === "hello") {
+      state.dictation.available = message.available;
+      state.dictation.enabled = message.enabled;
+      state.dictation.modelState = message.modelState || "idle";
+      state.dictation.recording = Boolean(message.state && message.state.recording);
+      renderDictation();
+      return;
+    }
+
+    // The speech model finished loading. Recording starts by itself if it was
+    // asked for while the model was still coming up.
+    if (message.type === "ready") {
+      state.dictation.modelState = "ready";
+      renderDictation();
+      return;
+    }
+
+    if (message.type === "recording") {
+      state.dictation.recording = true;
+      state.dictation.modelState = "ready";
+      state.dictation.startedAt = Date.now();
+      clearInterval(state.dictation.timer);
+      state.dictation.timer = setInterval(dictationTick, 250);
+      dictationTick();
+      renderDictation();
+      return;
+    }
+
+    if (message.type === "text") {
+      if (state.dictation.settled) return;
+      const parts = (message.committed || []).concat(message.active ? [message.active] : []);
+      applyTranscript(parts.join(" "));
+      return;
+    }
+
+    if (message.type === "stopped") {
+      state.dictation.recording = false;
+      clearInterval(state.dictation.timer);
+      if (message.transcript) applyTranscript(message.transcript);
+      // What was spoken becomes part of the text to build on, so a second
+      // recording adds to it rather than overwriting it. Nothing further is
+      // applied until the next recording starts: the server stops sending, and
+      // the page stops listening, so the finished text cannot be doubled.
+      state.dictation.base = ui.prompt.value.trim();
+      state.dictation.settled = true;
+      renderDictation();
+      if (message.reason === "time-limit") {
+        setNote("Recording stopped: the time limit was reached.", "warn");
+      }
+      ui.prompt.focus();
+      return;
+    }
+
+    if (message.type === "error") {
+      state.dictation.recording = false;
+      clearInterval(state.dictation.timer);
+      renderDictation();
+      setNote(message.message || "Dictation failed.", "error");
+      return;
+    }
+
+    if (message.type === "ended") {
+      state.dictation.recording = false;
+      state.dictation.modelState = "idle";
+      clearInterval(state.dictation.timer);
+      renderDictation();
+    }
+  };
+
+  stream.onerror = () => {
+    // The server may simply be restarting; EventSource reconnects by itself.
+    // Recording cannot survive that, so the banner is cleared rather than left
+    // showing an indicator for a microphone nobody holds.
+    if (state.dictation.recording) {
+      state.dictation.recording = false;
+      clearInterval(state.dictation.timer);
+      renderDictation();
+    }
+  };
+}
+
+async function dictationCall(action) {
+  const response = await fetch("/api/dictation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action })
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.error || `Dictation request failed (${response.status}).`);
+  }
+  return response.json();
+}
+
+async function toggleDictation() {
+  try {
+    if (state.dictation.recording) {
+      await dictationCall("stop");
+      return;
+    }
+    // Whatever is already in the box is kept; speech is added to it.
+    state.dictation.base = ui.prompt.value.trim();
+    state.dictation.settled = false;
+    // Shown immediately rather than after the request returns, so pressing the
+    // button always produces a visible response.
+    if (state.dictation.modelState !== "ready") {
+      state.dictation.modelState = "loading";
+      renderDictation();
+    }
+    await dictationCall("record");
+    setNote("Your conversation stays on this machine.");
+  } catch (error) {
+    setNote(error.message, "error");
+  }
+}
+
+async function refreshDictationState() {
+  try {
+    const response = await fetch("/api/dictation");
+    if (!response.ok) return;
+    const status = await response.json();
+    state.dictation.available = Boolean(status.available);
+    state.dictation.enabled = Boolean(status.enabled);
+    state.dictation.modelState = status.modelState || "idle";
+    state.dictation.recording = Boolean(status.state && status.state.recording);
+    renderDictation();
+    if (status.enabled && status.available) openDictationStream();
+  } catch {
+    // Dictation is optional; its absence must never stop the page loading.
+  }
+}
+
+ui.dictateBtn.addEventListener("click", toggleDictation);
+ui.dictationStop.addEventListener("click", () => {
+  if (state.dictation.recording) toggleDictation();
+});
+
 /* ================================================================== boot === */
 
 (async function boot() {
@@ -3310,6 +3530,7 @@ document.addEventListener("keydown", event => {
   // browser looks like the data was simply lost.
   await refreshBackupState();
   await refreshReaderState();
+  await refreshDictationState();
   await offerRestore();
 
   // Any change to chats, prompts, memory, library or preferences updates the

@@ -786,3 +786,205 @@ test("server: exiting releases the model before the process ends", async t => {
   assert.equal(fs.existsSync(stateFile), false,
     "the runtime state file must be cleared on exit");
 });
+
+/* ------------------------------------------------------------- dictation -- */
+
+test("dictation: settings are validated before they reach the command line", () => {
+  const { loadConfig } = require(path.join(ROOT, "src", "config.js"));
+
+  // Explicitly off rather than read from config.local.json, which belongs to
+  // whoever is running the suite and may legitimately have dictation switched
+  // on. The shipped default is asserted from config.json instead.
+  const shipped = JSON.parse(fs.readFileSync(path.join(ROOT, "config.json"), "utf8"));
+  assert.equal(shipped.dictation.enabled, false,
+    "dictation opens the microphone, so it must ship switched off");
+
+  const base = loadConfig([], { HORIZON_DICTATION: "false" });
+  assert.equal(base.dictation.enabled, false, "the setting must be honoured");
+
+  // The alias is passed to the Foundry CLI. A hand-edited config file is not a
+  // trusted source, so anything outside the safe set has to be refused rather
+  // than forwarded.
+  assert.throws(() => loadConfig([], { HORIZON_DICTATION_MODEL: "model; rm -rf /" }),
+    /Invalid dictation model alias/, "must refuse an alias containing shell syntax");
+  assert.throws(() => loadConfig([], { HORIZON_DICTATION_MODEL: "--output=json" }),
+    /Invalid dictation model alias/, "must refuse an alias that looks like a flag");
+
+  // A wrong idle timeout means a speech model held in memory, or a microphone
+  // released so aggressively that dictation is unusable.
+  assert.throws(() => loadConfig([], { HORIZON_DICTATION_IDLE_MS: "1000" }),
+    /Invalid dictation idle timeout/, "must refuse an idle timeout under a minute");
+  assert.throws(() => loadConfig([], { HORIZON_DICTATION_IDLE_MS: "5400000" }),
+    /Invalid dictation idle timeout/, "must refuse an idle timeout over thirty minutes");
+
+  const chosen = loadConfig([], { HORIZON_DICTATION_IDLE_MS: "600000" });
+  assert.equal(chosen.dictation.idleTimeoutMs, 600000, "a value in range must be kept");
+});
+
+test("dictation: terminal decoration is never mistaken for speech", () => {
+  const dictation = require(path.join(ROOT, "src", "dictation.js"));
+
+  // The CLI draws a prompt around the transcript. None of it was spoken, and
+  // all of it would otherwise be typed into the user's message.
+  for (const line of [
+    "Transcribing model (nemotron-speech-streaming-en-0.6b)",
+    "note: Type /help to see transcribe commands, /exit to quit.",
+    "note: Recording... type /stop to finish.",
+    "Press space bar and speak...",
+    "/record",
+    "--------------------------------"
+  ]) {
+    assert.equal(dictation.isChrome(line), true, `must ignore CLI chrome: ${line}`);
+  }
+
+  assert.equal(dictation.isChrome("This is a test dictation"), false,
+    "must keep what was actually said");
+
+  // Colour and title sequences arrive mixed into the text.
+  assert.equal(dictation.stripAnsi("\u001b[32mhello\u001b[0m"), "hello",
+    "must remove colour codes");
+  assert.equal(dictation.stripAnsi("\u001b]0;title\u0007hello"), "hello",
+    "must remove the window title sequence");
+
+  // The CLI wraps its output at the terminal width, and a narrow terminal
+  // splits words across chunks ("requested" arriving as "requ" then "ested").
+  // The width is the defence against that, so it is asserted rather than left
+  // as a number someone might reasonably tidy up later.
+  assert.ok(dictation.PTY_COLUMNS >= 2000,
+    "the terminal must be wide enough that lines are not wrapped mid-word");
+});
+
+test("dictation: the page is told honestly what this machine can do", async () => {
+  const stub = await startStubFoundry();
+  // Pinned off explicitly. Whether dictation is switched on lives in
+  // config.local.json, which belongs to whoever is running the suite, so the
+  // test must not read their setting and must not leave one behind.
+  const app = await startApp({ ...stubEnv(stub.port), HORIZON_DICTATION: "false" });
+
+  try {
+    const status = await (await request(`${app.url}/api/dictation`)).json();
+
+    // Whether node-pty is installed depends on the machine, but the answer must
+    // always be accompanied by a reason when the answer is no.
+    assert.equal(typeof status.available, "boolean", "must state whether dictation can run");
+    if (!status.available) {
+      assert.ok(status.reason, "must say why dictation is unavailable rather than failing silently");
+    }
+
+    // The browser plays no part in recording: the Foundry CLI opens the
+    // microphone. The page relies on this to know it must show its own
+    // recording indicator, because the tab will not show one.
+    assert.equal(status.browserCapturesAudio, false,
+      "the page must know that the browser does not capture the audio");
+
+    // Off by default, and refusing to act while off.
+    assert.equal(status.enabled, false, "must be off until switched on");
+    const refused = await request(`${app.url}/api/dictation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "record" })
+    });
+    assert.equal(refused.status, 409, "must refuse to record while switched off");
+
+    const unknownAction = await request(`${app.url}/api/dictation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "nonsense" })
+    });
+    // Still 409 while switched off: the capability gate comes first, which is
+    // the behaviour that matters.
+    assert.equal(unknownAction.status, 409, "must not act on an unknown action");
+  } finally {
+    await stop(app);
+    stub.server.close();
+  }
+});
+
+test("ui: a recording is always visible on the page", () => {
+  const css = fs.readFileSync(path.join(ROOT, "public", "app.css"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const html = fs.readFileSync(path.join(ROOT, "public", "index.html"), "utf8");
+
+  // Horizon never calls getUserMedia, so the browser shows no permission prompt
+  // and no recording indicator in the tab. The banner is the only signal the
+  // user gets that the microphone is open, and it must exist and be announced.
+  assert.match(html, /id="dictation-bar"/, "the recording banner must exist");
+  assert.match(html, /id="dictation-bar"[^>]*role="status"/,
+    "the banner must be announced to assistive technology");
+  assert.match(html, /aria-live="assertive"/,
+    "a live microphone is interrupting news, not a passing status");
+  assert.match(html, /id="dictation-stop"/, "the banner must offer a way to stop");
+
+  assert.ok(/\.dictation-bar\s*\{[^}]*\}/.test(css), ".dictation-bar must be styled");
+
+  // A microphone picker in the page would be a lie: the CLI records through
+  // whatever Windows has chosen, and nothing the page offers can change it.
+  assert.ok(!/id="mic-picker"|id="dictation-device"/.test(html),
+    "the page must not offer a microphone picker it cannot honour");
+});
+
+test("dictation: a redraw replaces the line rather than repeating it", () => {
+  const { DictationSession } = require(path.join(ROOT, "src", "dictation.js"));
+  const session = new DictationSession({ alias: "stub" });
+
+  const updates = [];
+  session.on("text", payload => updates.push(payload));
+
+  // How the CLI actually behaves, taken from a recorded session: while speech
+  // is being decoded it rewrites its last line in place and sends NO newline,
+  // the way a progress indicator does. Each update repositions the cursor
+  // first, which is the terminal saying the text draws over what is there.
+  session._consume("\u001b[38;2;107;114;128m\u001b[7;3H Testing testing");
+  session._consume("\u001b[m");
+  session._consume("\u001b[38;2;107;114;128m\u001b[7;3H Testing testing one two");
+  session._consume("\u001b[m");
+  session._consume("\u001b[38;2;107;114;128m\u001b[7;3H Testing testing one two three. This is a test");
+
+  // Waiting for a newline would hold everything back until recording stopped,
+  // which is what made dictation look like it was not streaming at all.
+  assert.ok(updates.length >= 3, "each redraw must reach the page as it happens");
+
+  // And each redraw replaces the line. Keeping every version is what made the
+  // transcript repeat the same sentence over and over.
+  assert.equal(session.transcript(), "Testing testing one two three. This is a test",
+    "a redrawn line must replace the previous text, not be added to it");
+
+  // The echo of a command being typed is not speech.
+  session._consume("\u001b[7;3H/sto");
+  assert.equal(session.transcript(), "Testing testing one two three. This is a test",
+    "a command being typed must never appear in the transcript");
+
+  // A genuine newline settles the segment, and a new one begins after it.
+  session._consume("\u001b[7;3H Testing testing one two three. This is a test and this is settled\n");
+  session._consume("\u001b[7;3H a second segment");
+  assert.match(session.transcript(), /settled a second segment$/,
+    "a completed line must be kept and the next line started after it");
+
+  // The model name is printed under the heading when the session opens, and is
+  // not something anyone said.
+  const fresh = new DictationSession({ alias: "stub" });
+  fresh._consume("\u001b[7;3H(nemotron-speech-streaming-en-0.6b)\n");
+  assert.equal(fresh.transcript(), "", "the model name must never appear in the transcript");
+});
+
+test("dictation: stopping does not repeat what was said", () => {
+  const { DictationSession } = require(path.join(ROOT, "src", "dictation.js"));
+  const session = new DictationSession({ alias: "stub" });
+
+  // Pretend a recording is running, then speak.
+  session.recording = true;
+  session._accepting = true;
+  session._consume("\u001b[7;3H This is a test dictation");
+  session._consume("\u001b[7;3H This is a test dictation that is working");
+
+  // Stopping settles the line. The CLI then repaints it, more than once, which
+  // is what made the finished transcript appear two and three times over.
+  session.recording = false;
+  session._accepting = false;
+  session._settle();
+  session._consume("\u001b[7;3H This is a test dictation that is working");
+  session._consume("\u001b[7;3H This is a test dictation that is working");
+
+  assert.equal(session.transcript(), "This is a test dictation that is working",
+    "the finished transcript must contain what was said exactly once");
+});

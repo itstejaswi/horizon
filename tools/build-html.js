@@ -55,6 +55,23 @@ const brand = `  <!-- The Horizon mark: a solid world with an open orbital arc s
     <rect x="2.4" y="2.9" width="4.2" height="8.7" rx="1.2"
           fill="none" stroke="currentColor" stroke-width="1.6"/>
   </symbol>
+  <!-- Dictation. Drawn here rather than taken from the icon set, for the same
+       reason as the glyphs above: the build has to work without the Fluent
+       package present. Same 20px grid and 1.6 stroke weight. The filled
+       version marks the recording state, where an outline is too quiet: the
+       browser shows no recording indicator of its own for this, because the
+       Foundry CLI opens the microphone rather than the page. -->
+  <symbol id="i-mic" viewBox="0 0 20 20">
+    <rect x="7.6" y="2.4" width="4.8" height="9.2" rx="2.4"
+          fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <path d="M4.9 9.6a5.1 5.1 0 0 0 10.2 0M10 14.7v2.9"
+          fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-mic-on" viewBox="0 0 20 20">
+    <rect x="7.6" y="2.4" width="4.8" height="9.2" rx="2.4" fill="currentColor"/>
+    <path d="M4.9 9.6a5.1 5.1 0 0 0 10.2 0M10 14.7v2.9"
+          fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  </symbol>
   <!-- A fallback glyph for the Foundry section, used only when Microsoft's own
        icon cannot be read from the local install (Foundry not installed, or the
        package directory unreadable). Where the real mark is available it is

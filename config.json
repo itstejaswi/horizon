@@ -44,5 +44,11 @@
   "reader": {
     "enabled": false,
     "maxChars": 12000
+  },
+  "dictation": {
+    "enabled": false,
+    "alias": "nemotron-speech-streaming-en-0.6b",
+    "maxRecordingMs": 300000,
+    "idleTimeoutMs": 300000
   }
 }

@@ -14,6 +14,7 @@ const runtime = require("./runtime");
 const desktop = require("./desktop");
 const backup = require("./backup");
 const reader = require("./reader");
+const dictation = require("./dictation");
 const { foundryIcon } = require("./brand");
 
 const CSP = "default-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'";
@@ -46,7 +47,10 @@ const state = {
   warm: false,
   // Live download progress, keyed by alias, so the page can poll while a
   // multi-gigabyte model comes down.
-  downloads: new Map()
+  downloads: new Map(),
+  // The dictation session and the pages listening to it. One session at a time:
+  // there is only one microphone.
+  dictation: { session: null, listeners: new Set() }
 };
 
 function securityHeaders(extra = {}) {
@@ -251,6 +255,87 @@ function startSse(res) {
 
 function sendSse(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+/* ---------------------------------------------------------------- dictation -- */
+
+function dictationBroadcast(payload) {
+  for (const listener of state.dictation.listeners) {
+    try {
+      sendSse(listener, payload);
+    } catch {
+      // The page went away mid-write; the close handler removes it.
+    }
+  }
+}
+
+// Whether dictation can run at all, and why not when it cannot. The page asks
+// this before offering a button, so the answer has to be honest rather than
+// optimistic.
+function dictationStatus() {
+  const capability = dictation.capability();
+  const session = state.dictation.session;
+  return {
+    enabled: Boolean(config.dictation.enabled),
+    available: capability.available,
+    reason: capability.reason,
+    alias: config.dictation.alias,
+    maxRecordingMs: config.dictation.maxRecordingMs,
+    idleTimeoutMs: config.dictation.idleTimeoutMs,
+    // The browser plays no part in recording: the Foundry CLI opens the
+    // microphone itself. There is therefore no permission prompt and no
+    // recording indicator in the tab, so the page has to supply its own.
+    browserCapturesAudio: false,
+    // Loading a speech model takes long enough that the page has to say so.
+    // Without this the only way to find out was to press record and wait,
+    // which looked indistinguishable from nothing happening at all.
+    modelState: !session ? "idle" : (session.ready ? "ready" : "loading"),
+    state: session ? session.state : { ready: false, recording: false, committed: [], active: "", elapsedMs: 0 }
+  };
+}
+
+function dictationSession() {
+  if (state.dictation.session) return state.dictation.session;
+
+  const session = new dictation.DictationSession({
+    alias: config.dictation.alias,
+    maxRecordingMs: config.dictation.maxRecordingMs,
+    idleTimeoutMs: config.dictation.idleTimeoutMs
+  });
+
+  session.on("ready", () => dictationBroadcast({ type: "ready" }));
+  session.on("recording", () => dictationBroadcast({ type: "recording" }));
+  session.on("text", payload => dictationBroadcast({ type: "text", ...payload }));
+  session.on("stopped", payload => dictationBroadcast({ type: "stopped", ...payload }));
+  session.on("error", payload => dictationBroadcast({ type: "error", ...payload }));
+  session.on("ended", payload => {
+    state.dictation.session = null;
+    dictationBroadcast({ type: "ended", ...payload });
+    // An idle session closes itself; the memory it was holding goes with it.
+    dictationRelease();
+  });
+
+  if (!session.start()) return null;
+  // The speech model is loaded by the Foundry CLI rather than by Horizon, so it
+  // would otherwise never be counted as ours and never released. Registering it
+  // here means the same shutdown that frees the chat model frees this one too.
+  state.loadedByUs.add(config.dictation.alias);
+  state.dictation.session = session;
+  return session;
+}
+
+// Closing the session ends the CLI, but the speech model stays resident in the
+// Foundry daemon, which outlives Horizon. Releasing it is the whole point of the
+// idle timeout, so it is done explicitly rather than left to chance.
+async function dictationRelease() {
+  if (!config.dictation.enabled) return;
+  if (!state.loadedByUs.has(config.dictation.alias)) return;
+  try {
+    await foundry.unloadModel(config.dictation.alias, 30000);
+    state.loadedByUs.delete(config.dictation.alias);
+  } catch {
+    // Nothing to do about it: the model is released when Foundry stops.
+  }
 }
 
 async function streamChat(req, res, body, truncated) {
@@ -700,6 +785,20 @@ const server = http.createServer((req, res) => {
         maxChars: config.reader.maxChars
       });
     }
+    if (urlPath === "/api/dictation") {
+      return sendJson(res, 200, dictationStatus());
+    }
+    if (urlPath === "/api/dictation/events") {
+      startSse(res);
+      state.dictation.listeners.add(res);
+      const session = state.dictation.session;
+      sendSse(res, { type: "hello", ...dictationStatus() });
+      req.on("close", () => state.dictation.listeners.delete(res));
+      // Nothing further to send until the session says something; the
+      // connection stays open for that.
+      if (session && session.ready) sendSse(res, { type: "ready" });
+      return;
+    }
     if (urlPath === "/api/backup") {
       return backup.status(config)
         .then(value => sendJson(res, 200, value))
@@ -842,6 +941,70 @@ const server = http.createServer((req, res) => {
           // this machine and it should be visible.
           console.log(`  Read ${page.url} (${page.characters} chars, ${Date.now() - started}ms)`);
           return sendJson(res, 200, page);
+        })
+        .catch(error => sendJson(res, 400, { error: error.message }));
+    }
+
+    if (urlPath === "/api/dictation") {
+      // Switching the capability on or off, and driving one session: start,
+      // record, stop, close.
+      return readBody(req, 2048)
+        .then(async raw => {
+          const body = JSON.parse(raw || "{}");
+
+          if (typeof body.enabled === "boolean") {
+            saveLocalSettings({ dictation: { enabled: body.enabled } });
+            config.dictation.enabled = body.enabled;
+            if (!body.enabled && state.dictation.session) {
+              state.dictation.session.close();
+              state.dictation.session = null;
+            }
+            return sendJson(res, 200, dictationStatus());
+          }
+
+          if (!config.dictation.enabled) {
+            return sendJson(res, 409, { error: "Dictation is switched off." });
+          }
+
+          const capability = dictation.capability();
+          if (!capability.available) {
+            // Said plainly rather than as a failed button press: this machine
+            // cannot run live dictation and no amount of retrying will help.
+            return sendJson(res, 501, { error: capability.reason });
+          }
+
+          if (body.action === "start" || body.action === "record") {
+            const session = dictationSession();
+            if (!session) return sendJson(res, 500, { error: "The dictation session could not be started." });
+            if (body.action === "record") {
+              if (!session.ready) {
+                // The model is still loading. Recording begins by itself once
+                // it is ready, so the user is not left pressing the button to
+                // find out whether anything is happening.
+                session.once("ready", () => session.record());
+                return sendJson(res, 202, dictationStatus());
+              }
+              session.record();
+            }
+            return sendJson(res, 200, dictationStatus());
+          }
+
+          if (body.action === "stop") {
+            const session = state.dictation.session;
+            if (!session) return sendJson(res, 409, { error: "Nothing is being recorded." });
+            session.stop();
+            return sendJson(res, 200, dictationStatus());
+          }
+
+          if (body.action === "close") {
+            if (state.dictation.session) {
+              state.dictation.session.close();
+              state.dictation.session = null;
+            }
+            return sendJson(res, 200, dictationStatus());
+          }
+
+          return sendJson(res, 400, { error: "Unknown dictation action." });
         })
         .catch(error => sendJson(res, 400, { error: error.message }));
     }
@@ -1149,6 +1312,14 @@ async function shutdown(signal) {
   guard.unref();
 
   server.close();
+  // Before anything else: a dictation session holds the microphone open, and
+  // leaving it open after Horizon exits would be indefensible.
+  if (state.dictation.session) {
+    try {
+      state.dictation.session.close();
+    } catch { /* the process may already be gone */ }
+    state.dictation.session = null;
+  }
   try {
     await releaseResources();
   } catch { /* never block exit on cleanup */ }

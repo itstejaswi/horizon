@@ -1094,6 +1094,56 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   color: var(--brand-fg);
 }
 
+/* The recording banner. Browsers show their own indicator when a page opens the
+   microphone, but Horizon never does: the Foundry CLI opens it instead, so the
+   tab stays silent and there is no permission prompt. This banner is the only
+   signal the user gets from Horizon, so it uses the danger palette and a moving
+   dot rather than sitting quietly in the interface. */
+.dictation-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-s);
+  max-width: var(--col-w);
+  margin: 0 auto var(--sp-s);
+  padding: var(--sp-s) var(--sp-mnudge);
+  border: var(--stroke-thin) solid var(--danger-fg);
+  border-radius: var(--r-xl);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  font-size: 12px;
+  line-height: 16px;
+  animation: rise var(--d-fast) var(--curve-decel);
+}
+.dictation-dot {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: dictation-pulse 1.2s ease-in-out infinite;
+}
+.dictation-timer { margin-left: auto; font-variant-numeric: tabular-nums; }
+.dictation-bar .btn-subtle { color: inherit; }
+/* Loading the speech model is information, not a live microphone, so it drops
+   the alarm colouring. Only a real recording gets the danger palette. */
+.dictation-bar[data-mode="loading"] {
+  border-color: var(--brand-fg);
+  background: var(--brand-tint);
+  color: var(--brand-fg);
+}
+.dictation-bar[data-mode="loading"] .dictation-dot { background: var(--brand-fg); }
+@keyframes dictation-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+/* Reduced motion still needs the indicator to read as active, so the dot holds
+   a steady full-strength colour instead of fading. */
+@media (prefers-reduced-motion: reduce) {
+  .dictation-dot { animation: none; }
+  .dictation-bar { animation: none; }
+}
+.btn-dictate[aria-pressed="true"] { color: var(--danger); }
+
 .attachments {
   display: flex;
   flex-wrap: wrap;

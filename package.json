@@ -9,7 +9,7 @@
                     "start":  "node src/server.js",
                     "test":  "node --test test/regression.js",
                     "build":  "node tools/build-html.js",
-                    "check":  "node --check src/server.js \u0026\u0026 node --check src/config.js \u0026\u0026 node --check src/foundry.js \u0026\u0026 node --check src/net.js \u0026\u0026 node --check src/runtime.js \u0026\u0026 node --check src/desktop.js \u0026\u0026 node --check src/backup.js \u0026\u0026 node --check src/reader.js \u0026\u0026 node --check public/app.js \u0026\u0026 node --check public/store.js",
+                    "check":  "node --check src/server.js \u0026\u0026 node --check src/config.js \u0026\u0026 node --check src/foundry.js \u0026\u0026 node --check src/net.js \u0026\u0026 node --check src/runtime.js \u0026\u0026 node --check src/desktop.js \u0026\u0026 node --check src/backup.js \u0026\u0026 node --check src/reader.js \u0026\u0026 node --check src/dictation.js \u0026\u0026 node --check public/app.js \u0026\u0026 node --check public/store.js",
                     "icons":  "node tools/build-icons-png.js"
                 },
     "engines":  {
@@ -18,6 +18,9 @@
     "dependencies":  {
 
                      },
+    "optionalDependencies":  {
+                                 "node-pty":  "^1.0.0"
+                             },
     "devDependencies":  {
 
                         },
