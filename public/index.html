@@ -17,23 +17,31 @@
      tools/build-icons.js. The brand mark is bespoke. -->
 <svg class="icon-defs" aria-hidden="true" focusable="false">
   <!-- The Horizon mark: a solid world with an open orbital arc sweeping
-       around it. Two shapes only, so it survives 16px where the previous
-       mark closed up into a blob. The arc break is deliberately asymmetric
-       so it does not read as a loading spinner. -->
+       around it, and two sparkles in the arc opening. The sparkles sit in
+       space the mark already leaves empty, so nothing is crowded, and they
+       stay small: the world and its orbit carry the mark, not the stars.
+       Kept deliberately light so the gap between the two sparkles holds
+       rather than closing into a single blot at small sizes. The arc break is
+       deliberately asymmetric so it does not read as a loading spinner. -->
   <symbol id="i-mark" viewBox="0 0 32 32">
     <circle cx="16" cy="16" r="6" fill="currentColor"/>
     <g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
       <path d="M16 5.6a10.4 10.4 0 0 1 0 20.8"/>
       <path d="M16 26.4a10.4 10.4 0 0 1-8.6-4.5"/>
     </g>
+    <path d="M7.1 6.0c.34 2.2.62 2.48 2.82 2.82-2.2.34-2.48.62-2.82 2.82-.34-2.2-.62-2.48-2.82-2.82 2.2-.34 2.48-.62 2.82-2.82z" fill="currentColor"/>
+    <path d="M7.1 13.55c.2 1.3.36 1.46 1.66 1.66-1.3.2-1.46.36-1.66 1.66-.2-1.3-.36-1.46-1.66-1.66 1.3-.2 1.46-.36 1.66-1.66z" fill="currentColor"/>
   </symbol>
-  <!-- Same geometry, marginally heavier, for 24px and below. -->
+  <!-- Same geometry, marginally heavier, for 24px and below. The smaller
+       sparkle is dropped here: below 24px it fills in and reads as a smudge
+       beside the larger one rather than as a second star. -->
   <symbol id="i-mark-sm" viewBox="0 0 32 32">
     <circle cx="16" cy="16" r="6.4" fill="currentColor"/>
     <g fill="none" stroke="currentColor" stroke-width="2.9" stroke-linecap="round">
       <path d="M16 5.4a10.6 10.6 0 0 1 0 21.2"/>
       <path d="M16 26.6a10.6 10.6 0 0 1-8.8-4.6"/>
     </g>
+    <path d="M7.0 6.6c.44 2.85.8 3.21 3.65 3.65-2.85.44-3.21.8-3.65 3.65-.44-2.85-.8-3.21-3.65-3.65 2.85-.44 3.21-.8 3.65-3.65z" fill="currentColor"/>
   </symbol>
   <!-- Drawn rather than taken from the icon set: a circled question mark is
        simple enough that it needs no dependency, and this keeps the build
