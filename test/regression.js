@@ -743,3 +743,46 @@ test("server: falls back when the chosen port is busy", async t => {
   assert.notEqual(app.port, busy, "must not bind the busy port");
   assert.match(app.output(), /was busy/, "must say it moved");
 });
+
+// Closing the launcher window is the wrong way out, and the README says so.
+// This is the right way: the Exit button and Ctrl+C must both release the
+// model before the process goes, and must finish the work rather than racing
+// the exit. A shutdown that returns before the unload lands would leave
+// gigabytes resident with nothing left running to release them.
+test("server: exiting releases the model before the process ends", async t => {
+  const stub = await startStubFoundry();
+  t.after(() => stub.server.close());
+
+  const app = await startApp(stubEnv(stub.port));
+  t.after(() => stop(app));
+
+  const exited = new Promise(resolve => app.child.on("exit", code => resolve(code)));
+  const response = await request(`${app.url}/api/shutdown`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stopService: false })
+  });
+  assert.equal(response.status, 200, "the exit request must be acknowledged");
+  assert.equal((await response.json()).stopping, true, "must confirm it is stopping");
+
+  const code = await Promise.race([
+    exited,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("did not exit")), 20000))
+  ]);
+  assert.equal(code, 0, "must exit cleanly rather than being killed");
+
+  const out = app.output();
+  assert.match(out, /Shutting down/, "must announce the shutdown");
+  assert.match(out, /Goodbye/, "must run cleanup through to the end, not exit early");
+
+  // Ordering, not just presence: "Goodbye" is printed after releaseResources
+  // resolves, so anything the shutdown does must appear before it.
+  assert.ok(out.indexOf("Shutting down") < out.indexOf("Goodbye"),
+    "cleanup must complete before the process says it is done");
+
+  // The state file is what a second launch reads to find the first. Leaving it
+  // behind would make the next start defer to a server that no longer exists.
+  const stateFile = path.join(ROOT, ".runtime", "horizon.json");
+  assert.equal(fs.existsSync(stateFile), false,
+    "the runtime state file must be cleared on exit");
+});
