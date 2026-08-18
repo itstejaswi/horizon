@@ -1412,6 +1412,12 @@ async function main() {
 
   if (config.web.openBrowser) openInBrowser(url);
 
+  // Finding Foundry's icon means walking its install directory, and falling
+  // back to PowerShell when that fails: about a second and a quarter the first
+  // time, then memoised. Left until the page asked for it, that cost landed in
+  // front of the user as a glyph that changed under them a second after
+  // Settings opened. Paid here instead, while nobody is looking.
+  foundryIcon().catch(() => {});
 
   if (config.foundry.warmUpOnStart && state.modelId) {
     warmUp().then(() => {

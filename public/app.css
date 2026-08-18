@@ -155,6 +155,10 @@
      properly, capped only so a very wide window does not stretch a line of
      text past comfortable reading length. */
   --col-w: min(1500px, 100%);
+  /* The thread reserves a gutter of exactly this width (scrollbar-gutter:
+     stable), and the composer has to match it or the two centred columns sit
+     half a scrollbar apart. Declared once so they cannot drift. */
+  --scrollbar-w: 10px;
   --drawer-w: 300px;
 }
 
@@ -878,6 +882,11 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* Reserved whether or not a scrollbar is showing, so a conversation growing
+     long enough to scroll does not shift the messages sideways. The gutter sits
+     on the trailing edge only -- "both-edges" is dropped by Chromium -- so the
+     composer below matches it explicitly. */
+  scrollbar-gutter: stable;
   padding: var(--sp-xxl) var(--sp-xxl) var(--sp-m);
   background: var(--surface);
   border-radius: var(--r-plane);
@@ -1425,7 +1434,12 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
    ========================================================================== */
 .composer-wrap {
   flex: none;
-  padding: 12px 16px;
+  /* Matches the thread above: the same horizontal padding, plus the scrollbar
+     gutter the thread reserves. Both panels centre a column of --col-w inside
+     themselves, so any difference here puts the composer and the messages on
+     two different centres -- a step down the right-hand edge, invisible on a
+     narrow window and obvious on a wide one. */
+  padding: 12px calc(var(--sp-xxl) + var(--scrollbar-w)) 12px var(--sp-xxl);
   background: var(--surface);
   border-radius: var(--r-plane);
   box-shadow: var(--elev-2);
@@ -2696,7 +2710,7 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
 }
 
 /* Scrollbars */
-::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar { width: var(--scrollbar-w); height: var(--scrollbar-w); }
 ::-webkit-scrollbar-thumb {
   background: var(--stroke-1);
   border-radius: var(--r-pill);
@@ -2704,7 +2718,14 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--fg-3); background-clip: content-box; }
+/* Transparent lets the page show through, which is invisible in light mode and
+   reads as a slice cut out of the panel in dark, where the surface is lighter
+   than the page behind it. The track belongs to the panel it sits in, so it
+   takes the panel's colour and the gutter stops looking like a gap. */
 ::-webkit-scrollbar-track { background: transparent; }
+.thread::-webkit-scrollbar-track,
+.drawer-body::-webkit-scrollbar-track,
+.ws-body::-webkit-scrollbar-track { background: var(--surface); }
 /* The thumb must not run into the plane's rounded corners, or it reads as a
    notch cut out of the card. */
 .thread::-webkit-scrollbar-track { margin-block: var(--r-plane); }

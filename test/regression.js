@@ -1259,7 +1259,12 @@ test("chat: reasoning says how long it took, and survives a reload", () => {
   const thinkingLabel = new Function(`${label[0]}\nreturn thinkingLabel;`)();
 
   // Present tense only while it is actually happening.
-  assert.equal(thinkingLabel(0), "Working it out");
+  assert.equal(thinkingLabel(null), "Working it out");
+  assert.equal(thinkingLabel(undefined), "Working it out");
+  // A fast model can open and close its reasoning inside a single chunk, so
+  // zero is a real measurement. Treating it as "no measurement" left a finished
+  // reply claiming to still be working.
+  assert.equal(thinkingLabel(0), "Thought for 0.0s");
   assert.equal(thinkingLabel(8200), "Thought for 8.2s");
   assert.equal(thinkingLabel(45000), "Thought for 45s");
   // Rolls over to minutes rather than counting to "125s", which nobody reads
@@ -1273,10 +1278,10 @@ test("chat: reasoning says how long it took, and survives a reload", () => {
     "the clock must stop when the closing tag arrives");
 
   // A reloaded chat must not claim to still be working.
-  assert.match(source, /thoughtMs: Math\.round\(thoughtMs\)/,
-    "the duration must be stored on the turn");
-  assert.match(source, /thinkingLabel\(turn\.thoughtMs\)/,
-    "a replayed turn must use its stored duration");
+  assert.match(source, /thoughtMs === null \? \{\} : \{ thoughtMs: Math\.round\(thoughtMs\) \}/,
+    "the duration must be stored whenever it was measured, including zero");
+  assert.match(source, /thinkingLabel\(turn\.thoughtMs \?\? 0\)/,
+    "a replayed turn must use its stored duration, and never claim to still be working");
 
   // The orbit stops at the closing tag, not at the answer's first character:
   // otherwise it spins through the gap between the two.
@@ -1345,4 +1350,27 @@ test("chat: a model's headings and rules are shown as structure, not as text", (
   // The cheap path skips all of this, so it must not skip text that needs it.
   const fast = /if \(!\/\[`\*#\]\/\.test\(value\) && !value\.includes\("---"\)\)/.exec(source);
   assert.ok(fast, "the fast path must also rule out headings and rules");
+});
+
+test("brand: Foundry's own icon is found before the page asks for it", () => {
+  const server = fs.readFileSync(path.join(ROOT, "src", "server.js"), "utf8");
+
+  // Locating the icon walks the install directory and falls back to
+  // PowerShell: about a second and a quarter on a cold start, then memoised.
+  // Left until the page asks, that cost is paid in front of the user, and the
+  // glyph changes under them a second after Settings opens.
+  assert.match(server, /foundryIcon\(\)\.catch\(\(\) => \{\}\)/,
+    "the icon must be looked up at startup, not on first sight of it");
+
+  // A failure here is not worth a word: the page already falls back to its own
+  // glyph, which is the same outcome as Foundry not being installed.
+  const startup = server.slice(server.indexOf("foundryIcon().catch"));
+  assert.ok(!/foundryIcon\(\)\.catch\(\(\) => \{\}\)\s*\.then/.test(startup),
+    "warming the icon must not gate anything else");
+
+  const client = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
+  // The fallback is still drawn first, so an uninstalled Foundry shows a glyph
+  // rather than a gap.
+  assert.match(client, /wrap\.append\(icon\(fallbackId/,
+    "the fallback glyph must still be drawn before the real one arrives");
 });

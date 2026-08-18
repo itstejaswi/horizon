@@ -33,6 +33,9 @@ const state = {
   controller: null,
   drawer: null,
   models: [],
+  // Whether the model list has actually been fetched. Distinct from an empty
+  // list: "none downloaded" and "not asked yet" must not read the same.
+  modelsKnown: false,
   activeAlias: null,
   wire: [],
   wireCount: 0,
@@ -594,8 +597,12 @@ function splitThinking(text, partial = false) {
 // "Working it out" while it is happening, "Thought for 8s" once it is over: the
 // present tense is a lie the moment the reasoning stops, and on a small model
 // the time it took is worth knowing.
+//
+// Takes null while the reasoning is still arriving. A number means finished,
+// including zero: a fast model can open and close its reasoning inside one
+// chunk, and "0.0s" is a truer answer than claiming it is still thinking.
 function thinkingLabel(ms) {
-  if (!ms) return "Working it out";
+  if (ms === null || ms === undefined) return "Working it out";
   const seconds = ms / 1000;
   if (seconds < 60) return `Thought for ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
   const minutes = Math.floor(seconds / 60);
@@ -694,8 +701,11 @@ function renderChat() {
     if (thinking) {
       const details = el("details", "thinking");
       const summary = el("summary");
+      // A replayed turn has finished by definition, so an absent duration means
+      // it was recorded before durations were kept -- not that it is still
+      // thinking. Zero is used, which reads as "no time worth reporting".
       summary.append(icon("i-orbit", "thinking-glyph"),
-        document.createTextNode(thinkingLabel(turn.thoughtMs)));
+        document.createTextNode(thinkingLabel(turn.thoughtMs ?? 0)));
       const body = el("div", null, thinking);
       details.append(summary, body);
       node.bubble.append(details);
@@ -704,7 +714,11 @@ function renderChat() {
     // Fall back to the raw content only when there was no thinking block at
     // all. An unterminated block yields an empty answer, and reprinting the
     // raw text there would dump the <think> markup back into the bubble.
-    const shown = thinking ? answer : (answer || turn.content);
+    //
+    // A user turn shows what they typed: the page text and the reader's
+    // preamble were for the model, and replaying them here would bury the
+    // conversation under the pages it read.
+    const shown = turn.typed || (thinking ? answer : (answer || turn.content));
     const answerNode = el("span");
     renderInto(answerNode, shown);
     node.bubble.append(answerNode);
@@ -741,7 +755,13 @@ function persistTurns() {
   const patch = { turns: state.chat.turns };
   if (state.chat.title === "New chat") {
     const first = state.chat.turns.find(turn => turn.role === "user");
-    if (first) patch.title = first.content.slice(0, 48).replace(/\s+/g, " ").trim();
+    // "typed" is what the person actually wrote. Without it the title comes
+    // from the reader's preamble, so every page-reading chat was called
+    // "The following page text was fetched for you. Use".
+    if (first) {
+      const source = first.typed || first.content;
+      patch.title = source.slice(0, 48).replace(/\s+/g, " ").trim();
+    }
   }
 
   const updated = db.updateChat(state.chat.id, patch);
@@ -2246,6 +2266,9 @@ async function refreshModels() {
     state.models = data.models || [];
     state.activeAlias = data.activeAlias;
     state.assistantLabel = data.active || state.assistantLabel;
+    // An empty list means nothing is downloaded; an unasked question means
+    // nothing is known yet. Saying "no models" before looking would be a guess.
+    state.modelsKnown = true;
   } catch { /* status check will report it */ }
 }
 
@@ -2254,7 +2277,24 @@ function renderPickerMenu() {
   ui.pickerMenu.append(el("div", "picker-head", "Models available offline on this machine"));
 
   if (!state.models.length) {
-    ui.pickerMenu.append(el("div", "drawer-empty", "No models downloaded."));
+    // A dead end is not an answer. Nothing is on this machine yet, so the menu
+    // says so and points at the one place that can change it.
+    const empty = el("div", "drawer-empty");
+    empty.append(
+      el("p", null, "No offline models available."),
+      el("p", null, "Models are downloaded once, then run without a network.")
+    );
+    const go = el("button", "btn-subtle");
+    go.type = "button";
+    go.append(icon("i-model", "btn-subtle-icon"), document.createTextNode("Browse models"));
+    go.addEventListener("click", () => {
+      closePicker();
+      setMode("settings");
+      settingsSection = "models";
+      renderSettings();
+    });
+    empty.append(go);
+    ui.pickerMenu.append(empty);
     return;
   }
 
@@ -2350,6 +2390,13 @@ async function refreshStatus() {
     if (data.ready) {
       setModelState("ready", data.alias || data.model);
       hideBanner();
+    } else if (state.modelsKnown && state.models.length === 0) {
+      // Nothing downloaded is not the same as something broken. "Not ready"
+      // reads as a fault and leaves people looking for what went wrong, when
+      // the answer is simply that no model has been chosen yet.
+      setModelState("warn", "No offline models");
+      ui.prompt.placeholder = "Send a message";
+      showBanner("No models on this computer yet. Settings \u2192 Models has the catalogue; each one is downloaded once, then runs without a network.", "warn");
     } else {
       setModelState("warn", data.alias || "Not ready");
       showBanner(data.error || "The model is not loaded yet.", "warn");
@@ -3289,7 +3336,10 @@ async function submit() {
   // an empty bubble sitting there.
   const { text: value, pages } = await readLinkedPages(withFiles);
 
-  state.chat.turns.push({ role: "user", content: value });
+  // The model is given the page text and the reader's preamble; the person is
+  // not. Keeping what they typed means the bubble, the title and the copy
+  // button show the question rather than the wrapper around it.
+  state.chat.turns.push({ role: "user", content: value, typed: question });
   const userTurn = createTurn("user", "You");
 
   // The bubble shows what the person wrote plus a note of what came with it.
@@ -3351,7 +3401,9 @@ async function submit() {
   let thinkingBox = null;
   let thinkingLabelNode = null;
   let thoughtStartedAt = null;
-  let thoughtMs = 0;
+  // Null until the reasoning closes, so an unfinished one is never mistaken for
+  // one that finished instantly.
+  let thoughtMs = null;
   let collapsedOnce = false;
   let answerBox = null;
 
@@ -3390,7 +3442,7 @@ async function submit() {
       // answer's first character instead would leave the orbit spinning
       // through the gap between the two.
       const closed = visible.includes("</think>");
-      thinkingLabelNode.textContent = thinkingLabel(closed ? thoughtMs : 0);
+      thinkingLabelNode.textContent = thinkingLabel(closed ? thoughtMs : null);
       // The orbit turns while the reasoning is still arriving, and stops when
       // it is done: motion means work in progress, nothing else.
       thinkingBox.classList.toggle("is-live", !closed);
@@ -3520,7 +3572,7 @@ async function submit() {
             if (thoughtStartedAt === null && full.includes("<think>")) {
               thoughtStartedAt = performance.now();
             }
-            if (thoughtMs === 0 && thoughtStartedAt !== null && full.includes("</think>")) {
+            if (thoughtMs === null && thoughtStartedAt !== null && full.includes("</think>")) {
               thoughtMs = performance.now() - thoughtStartedAt;
             }
             startReveal();
@@ -3569,8 +3621,11 @@ async function submit() {
       content: full,
       model: summary.model || state.assistantLabel,
       // Kept so a reloaded chat still says how long it thought, rather than
+      // Kept so a reloaded chat still says how long it thought, rather than
       // falling back to the present tense for reasoning that finished days ago.
-      ...(thoughtMs ? { thoughtMs: Math.round(thoughtMs) } : {})
+      // Tested against null, not truthiness: a fast model can finish inside one
+      // chunk, and dropping that zero would leave the panel working for ever.
+      ...(thoughtMs === null ? {} : { thoughtMs: Math.round(thoughtMs) })
     });
     persistTurns();
     addTools(reply.turn, reply.main, () => answer || full);
