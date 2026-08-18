@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Horizon — user guide</title>
+<meta name="description" content="How to use Horizon: chatting, choosing a model, dictation, reading a page, memory, saved prompts, and shutting down properly.">
+<meta name="color-scheme" content="dark">
+
+<link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+
+<!--
+  Same as the front page: no CDN, no web fonts, no analytics, no third-party
+  anything. View source and check.
+-->
+<link rel="stylesheet" href="site.css">
+<style>
+  /* Long-form prose, which the front page has none of. */
+  .guide{display:grid;grid-template-columns:216px 1fr;gap:52px;align-items:start}
+  .guide h3{margin:38px 0 10px;font-size:1.15rem;scroll-margin-top:78px}
+  .guide h3:first-child{margin-top:0}
+  .guide p{margin:0 0 13px;max-width:64ch}
+  .guide ul{margin:0 0 13px;padding-left:20px;max-width:64ch}
+  .guide li{margin:0 0 7px}
+  .guide figure{margin:22px 0 26px;max-width:64ch}
+
+  /* The contents stay put, because a list that scrolls away is no better than
+     no list at all. Offset by the header, which is sticky too. */
+  .contents{position:sticky;top:84px}
+  .contents h4{font-size:.76rem;text-transform:uppercase;letter-spacing:.7px;
+               color:var(--fg-dim);margin:0 0 12px;font-weight:600}
+  .contents ol{list-style:none;margin:0;padding:0;counter-reset:c}
+  .contents li{margin:0;counter-increment:c}
+  .contents a{display:block;padding:6px 0 6px 26px;font-size:.88rem;position:relative;
+              color:var(--fg-muted);text-decoration:none;line-height:1.4}
+  .contents a::before{content:counter(c);position:absolute;left:0;top:6px;
+                      color:var(--fg-dim);font-size:.78rem;
+                      font-variant-numeric:tabular-nums}
+  .contents a:hover{color:var(--fg)}
+  .contents .tip{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);
+                 color:var(--fg-dim);font-size:.8rem;line-height:1.5}
+
+  dl.keys{margin:0 0 13px;max-width:64ch}
+  dl.keys dt{font-weight:600;margin-top:11px}
+  dl.keys dd{margin:2px 0 0;color:var(--fg-dim)}
+
+  @media(max-width:900px){
+    .guide{grid-template-columns:1fr;gap:0}
+    /* Stacked, a pinned list would eat the screen, so it becomes a plain list
+       at the top and scrolls away with everything else. */
+    .contents{position:static;margin-bottom:38px;padding-bottom:26px;
+              border-bottom:1px solid var(--border)}
+    .contents ol{columns:2;column-gap:24px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <nav class="nav">
+    <a class="brand" href="index.html">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7" fill="#0F6CBD"/>
+        <g transform="translate(16 16) scale(0.74) translate(-16 -16)">
+          <circle cx="16" cy="16" r="6" fill="#fff"/>
+          <g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round">
+            <path d="M16 5.6a10.4 10.4 0 0 1 0 20.8"/>
+            <path d="M16 26.4a10.4 10.4 0 0 1-8.6-4.5"/>
+          </g>
+          <path d="M7.1 6.0c.34 2.2.62 2.48 2.82 2.82-2.2.34-2.48.62-2.82 2.82-.34-2.2-.62-2.48-2.82-2.82 2.2-.34 2.48-.62 2.82-2.82z" fill="#fff"/>
+          <path d="M7.1 13.55c.2 1.3.36 1.46 1.66 1.66-1.3.2-1.46.36-1.66 1.66-.2-1.3-.36-1.46-1.66-1.66 1.3-.2 1.46-.36 1.66-1.66z" fill="#fff"/>
+        </g>
+      </svg>
+      Horizon
+    </a>
+    <div class="nav-links">
+      <a href="index.html#look">A look inside</a>
+      <a href="index.html#how">How it works</a>
+      <a href="index.html#install">Install</a>
+      <a href="https://github.com/itstejaswi/horizon">GitHub</a>
+    </div>
+  </nav>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>User guide</h2>
+    <p class="lede">Everything Horizon does, in the order you are likely to meet it.
+       Not installed it yet? <a href="index.html#install">Start here</a>.</p>
+  </div>
+
+  <div class="wrap guide">
+    <nav class="contents" aria-label="Contents">
+      <h4>Contents</h4>
+      <ol>
+        <li><a href="#first">Your first question</a></li>
+        <li><a href="#models">Choosing a model</a></li>
+        <li><a href="#thinking">When a model shows its working</a></li>
+        <li><a href="#dictation">Talking instead of typing</a></li>
+        <li><a href="#pages">Reading a page</a></li>
+        <li><a href="#keeping">Keeping things</a></li>
+        <li><a href="#badge">Knowing where you stand</a></li>
+        <li><a href="#closing">Closing properly</a></li>
+        <li><a href="#wrong">When something looks wrong</a></li>
+      </ol>
+      <p class="tip">Looking for a word? Ctrl&#8202;+&#8202;F searches the whole page.</p>
+    </nav>
+
+    <div class="guide-body">
+
+    <h3 id="first">Your first question</h3>
+    <figure>
+      <img src="assets/horizon-chat.jpg" alt="A reply from phi-4 answering whether 91 is a prime number, with token throughput and timing shown beneath the message box." loading="lazy">
+      <figcaption>A reply, and underneath it what the reply actually cost.</figcaption>
+    </figure>
+    <p>Type into the box at the bottom and press Enter. The first answer of a session
+       is slow — twenty or thirty seconds on a large model — because it has to be read
+       into memory first. After that it stays loaded and replies come quickly.</p>
+    <p>Underneath each reply Horizon shows what it cost: how many tokens, how fast, and
+       how long you waited. Measured, not estimated.</p>
+
+    <dl class="keys">
+      <dt>Enter</dt><dd>Send.</dd>
+      <dt>Shift + Enter</dt><dd>New line without sending.</dd>
+      <dt>The send button, mid-reply</dt><dd>Stops it. What has arrived is kept.</dd>
+    </dl>
+
+    <h3 id="models">Choosing a model</h3>
+    <p>The picker at the top lists every model on this computer, with the hardware it
+       runs on and its size. Switching is live: no restart, and your conversation is
+       kept.</p>
+    <p>Bigger is generally better at reasoning and worse at waiting. A 529&nbsp;MB model
+       answers almost immediately and gets arithmetic wrong; an 8&nbsp;GB one takes its
+       time and is far steadier.</p>
+    <p>New models come from <b>Settings → Models</b>, downloaded once and then run
+       without a network. Nothing is fetched unless you ask for it.</p>
+
+    <h3 id="thinking">When a model shows its working</h3>
+    <figure>
+      <img src="assets/horizon-reasoning.jpg" alt="A reply with an expanded panel headed Thought for 8.5s, showing the model reasoning about whether 91 is prime, with the answer beneath." loading="lazy">
+      <figcaption>The working, kept apart from the answer.</figcaption>
+    </figure>
+    <p>Some models publish their reasoning separately. When one does, Horizon puts it in
+       its own panel with the time it took. The panel closes itself once the answer
+       begins — but if you opened it to read, it stays open.</p>
+    <p><b>Most models have no such panel, and that is normal.</b> A model without one is
+       not hiding anything: it works through the problem inside its answer, the way you
+       can see it doing when it writes "first, let us check…". This is a property of the
+       model, not a setting you have missed.</p>
+
+    <h3 id="dictation">Talking instead of typing</h3>
+    <figure>
+      <img src="assets/horizon-dictation.jpg" alt="Horizon with a red banner reading Listening, a running timer, and dictated words appearing in the message box." loading="lazy">
+      <figcaption>Recording, said plainly, with a clock and a way out.</figcaption>
+    </figure>
+    <p>Off until you turn it on, in <b>Settings → Behaviour</b>. Switching it on
+       downloads a speech model once; after that it works with no internet at all.</p>
+    <p>Press the microphone and speak; the words appear as you go. Press Stop, or the
+       microphone again, to finish.</p>
+    <p><b>Worth knowing:</b> the recording is opened by Foundry, not by your browser, so
+       your browser shows no recording dot and never asks your permission. That is why
+       Horizon shows a red banner and a running clock of its own. No banner, no
+       recording.</p>
+    <p>Which microphone is used is decided by Windows, not by Horizon.</p>
+
+    <h3 id="pages">Reading a page</h3>
+    <figure>
+      <img src="assets/horizon-reading.jpg" alt="Horizon with a pasted news link, a notice saying the page will be read, and an amber badge reading Connecting to internet." loading="lazy">
+      <figcaption>The one thing that leaves your computer, announced before it happens.</figcaption>
+    </figure>
+    <p>Models cannot open links. Paste one and, left alone, the model guesses from the
+       address and invents the rest.</p>
+    <p>So Horizon can fetch the page and hand the text to the model. This is <b>off by
+       default</b>, being the only feature that reaches outside your machine. Turn it on
+       in <b>Settings → Behaviour</b>. Once on, pasting a link shows a notice, and the
+       badge turns amber while it happens.</p>
+
+    <h3 id="keeping">Keeping things</h3>
+    <p>Four panels down the left:</p>
+    <ul>
+      <li><b>History</b> — every conversation, searchable. A chat is only written down
+        once it has something in it.</li>
+      <li><b>Prompts</b> — questions you want to ask again, saved with a name.</li>
+      <li><b>Memory</b> — facts every model should know about you. Added to the start of
+        every conversation, so keep them short.</li>
+      <li><b>Library</b> — replies you have saved.</li>
+    </ul>
+    <p>All four live in your browser's storage on this computer. <b>Settings →
+       Storage</b> shows where, exports the lot, and can erase everything.</p>
+
+    <h3 id="badge">Knowing where you stand</h3>
+    <p>The badge in the bottom-left says one of three things:</p>
+    <ul>
+      <li><b>Connected local</b> — talking to the model on this machine, nothing else.</li>
+      <li><b>Connecting to internet</b> — a page is being fetched. It stays amber a while
+        afterwards, and keeps a mark, so a quick fetch is not something you can miss.</li>
+      <li><b>Fully offline</b> — no model running.</li>
+    </ul>
+    <p>It is a claim, so you can check it: press the badge and Horizon shows every
+       request it has made and where each one went.</p>
+
+    <h3 id="closing">Closing properly</h3>
+    <figure>
+      <img src="assets/horizon-shutdown.jpg" alt="A dialog headed Shut down Horizon explaining the model is held in memory by the Foundry service, with a checkbox to also stop that service." loading="lazy">
+      <figcaption>Closing the tab is not the same as shutting down.</figcaption>
+    </figure>
+    <p>Closing the tab orphans the model in memory. Use the power button at the foot of
+       the left rail instead; it offers to stop the Foundry service too, which is what
+       actually returns the memory.</p>
+
+    <h3 id="wrong">When something looks wrong</h3>
+    <ul>
+      <li><b>The first answer is very slow.</b> Expected. The model is being read into
+        memory. Later answers are much faster.</li>
+      <li><b>The model says something confidently wrong.</b> Also expected, especially
+        on small models. Nothing here checks facts. The smaller the model, the more
+        this matters.</li>
+      <li><b>A pasted link was answered without being read.</b> Link reading is off.
+        Turn it on in Settings → Behaviour.</li>
+      <li><b>No thinking panel.</b> The model does not publish its reasoning. See
+        <a href="#thinking">above</a>.</li>
+      <li><b>Dictation types nothing.</b> Check the red banner is showing, and that
+        Windows is listening to the microphone you are speaking into.</li>
+      <li><b>Nothing works and the badge says fully offline.</b> Foundry has stopped.
+        <b>Settings → Foundry</b> restarts it.</li>
+    </ul>
+    <p>Anything else is worth <a href="https://github.com/itstejaswi/horizon/issues">reporting</a>.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><strong style="color:var(--fg-muted)">Horizon</strong> — free software under the
+      <a href="https://github.com/itstejaswi/horizon/blob/main/LICENSE">GNU Affero General Public Licence v3</a>.
+      Designed and built by <a href="https://itstejaswi.github.io">Tejaswi</a>.
+      <a href="https://github.com/itstejaswi/horizon">Source on GitHub</a>.</p>
+    <p class="fine">Microsoft, Azure, Foundry and Foundry Local are trademarks of the
+      Microsoft group of companies, used here only to name the software Horizon connects
+      to. Horizon is not a Microsoft product and is not affiliated with or endorsed by
+      Microsoft.</p>
+  </div>
+</footer>
+
+</body>
+</html>
