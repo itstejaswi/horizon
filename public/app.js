@@ -5,7 +5,7 @@ const $ = id => document.getElementById(id);
 
 const ui = {
   thread: $("thread"), empty: $("empty"), prompt: $("prompt"), send: $("send"),
-  sendIcon: $("send-icon"), clear: $("clear"), note: $("note"),
+  sendIcon: $("send-icon"), note: $("note"),
   banner: $("banner"), bannerText: $("banner-text"),
   chatTitle: $("chat-title"), chatTitleText: $("chat-title-text"),
   threadHead: $("thread-head"), threadMeta: $("thread-meta"),
@@ -43,6 +43,9 @@ const state = {
   // read in the browser and folded into the message itself.
   attachments: [],
   limits: null,
+  // Remembered so the air-gap badge can say that Horizon reached out, after
+  // the amber has faded. A signal nobody saw is not a signal.
+  lastReachedOut: null,
   // Live dictation. The transcript arrives from the server as it is spoken;
   // `base` is whatever was already typed, so speech is added to it rather than
   // replacing the user's own text.
@@ -250,7 +253,11 @@ function updateUrlWarning() {
 // Pulls out every link in a message, so a note with two references reads both.
 function findUrls(text) {
   const matches = String(text).match(/\bhttps?:\/\/[^\s<>"')]+|\bwww\.[^\s<>"')]+/gi) || [];
-  return [...new Set(matches.map(url => (url.startsWith("http") ? url : `https://${url}`)))].slice(0, 3);
+  // The match is case-insensitive, so the scheme test has to be too. Without
+  // this, "HTTps://example.com" fails the check and gets a second scheme glued
+  // in front of it, producing an address that resolves to nothing recognisable
+  // and an error about a certificate for somewhere else entirely.
+  return [...new Set(matches.map(url => (/^https?:\/\//i.test(url) ? url : `https://${url}`)))].slice(0, 3);
 }
 
 // Fetched text is wrapped and labelled so the model can tell the page apart
@@ -285,8 +292,14 @@ async function readLinkedPages(message) {
     } catch (error) {
       // A failed read must not lose the message. The model is told the page
       // could not be read, which is far better than letting it guess.
+      //
+      // What it is told is deliberately plain. The underlying error can be a
+      // certificate or DNS dump naming hosts that have nothing to do with the
+      // request, and handing that to a model produces an answer about the
+      // wrong thing entirely. The reason is kept for the page chip, where the
+      // user can see it; the model is simply told the page is not available.
       pages.push({ url, failed: true, reason: error.message });
-      blocks.push(`--- Page: ${url}\n--- Could not be read: ${error.message}`);
+      blocks.push(`--- Page: ${url}\n--- Could not be read. Do not guess at what it says.`);
       setNote(error.message, "warn");
     } finally {
       clearReachingOut();
@@ -336,14 +349,36 @@ function refreshAirGap() {
 
   // The wording leads with what Horizon guarantees - that it runs on this
   // machine - rather than reporting the network as though it were a feature.
-  ui.airgapText.textContent = online ? "Runs locally" : "Fully offline";
-  ui.airgapBadge.title = online
-    ? "Served by the local server on this machine. Horizon sends nothing outward."
-    : "No network is available, so nothing could leave this machine even if it tried.";
+  ui.airgapText.textContent = online ? "Connected local" : "Fully offline";
+  // A badge that only lights up while something is happening is no use to
+  // anyone who looked away. Once Horizon has reached out, the badge keeps
+  // saying so, and pressing it shows exactly what was fetched and when.
+  const lastReach = state.lastReachedOut;
+  if (lastReach) {
+    ui.airgapBadge.dataset.reached = "true";
+    ui.airgapBadge.title = `${lastReach.host ? `Last reached ${lastReach.host}` : "Last reached a page"} at ${lastReach.at}. Nothing else has left this machine. Press to see every request.`;
+  } else {
+    delete ui.airgapBadge.dataset.reached;
+    ui.airgapBadge.title = online
+      ? "Connected to the local server on this machine only. Horizon has sent nothing outward. Press to see every request it has made."
+      : "No network is available, so nothing could leave this machine even if it tried. Press to see every request Horizon has made.";
+  }
 
   const use = ui.airgapGlyph && ui.airgapGlyph.querySelector("use");
   if (use) use.setAttribute("href", online ? "#i-plug-on" : "#i-globe-off");
   if (state.drawer === "connection") renderDrawer();
+}
+
+// The badge makes a claim, so it has to be possible to check it. Pressing it
+// opens the request log, which is the evidence: every exchange Horizon has had,
+// and the address each one went to. A promise with no way to verify it is
+// worth very little.
+function openTrafficLog() {
+  setMode("settings");
+  settingsSection = "foundry";
+  renderSettings();
+  const log = document.getElementById("wire-log") || $("settings-body");
+  if (log && log.scrollIntoView) log.scrollIntoView({ block: "end", behavior: "smooth" });
 }
 
 // Called around a page fetch. The host is named, because "something reached
@@ -356,18 +391,30 @@ function markReachingOut(hostname) {
   reachOutTimer = null;
 
   ui.airgapBadge.dataset.state = "reaching";
-  ui.airgapText.textContent = hostname ? `Reading ${hostname}` : "Reading a page";
+  // The address is already in the message the user just sent, so repeating it
+  // here says nothing new. What matters is the change of state: this is no
+  // longer local.
+  ui.airgapText.textContent = "Connecting to internet";
+  // Remembered, so the badge can still say this happened once the amber has
+  // faded. Someone who was reading the reply rather than watching the footer
+  // should still be able to find out.
+  state.lastReachedOut = {
+    host: hostname || null,
+    at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  };
   ui.airgapBadge.title = hostname
-    ? `Horizon is fetching ${hostname} so the model can read it. The page text stays on this machine.`
-    : "Horizon is fetching a page so the model can read it. The page text stays on this machine.";
+    ? `Horizon is fetching ${hostname} so the model can read it. The page text stays on this machine. Press to see the request.`
+    : "Horizon is fetching a page so the model can read it. The page text stays on this machine. Press to see the request.";
 
   const use = ui.airgapGlyph && ui.airgapGlyph.querySelector("use");
   if (use) use.setAttribute("href", "#i-globe");
   if (state.drawer === "connection") renderDrawer();
 }
 
-// Held briefly after the fetch finishes, so a quick read still registers as
-// something you saw happen rather than a flicker you might have missed.
+// Held after the fetch finishes, because this is the only signal that anything
+// left the machine and a flicker is worth nothing. Ten seconds is long enough
+// to be noticed by someone who was reading rather than watching the footer, and
+// the badge stays pressable throughout: the request log is the lasting record.
 function clearReachingOut() {
   clearTimeout(reachOutTimer);
   reachOutTimer = setTimeout(() => {
@@ -376,7 +423,7 @@ function clearReachingOut() {
       ui.airgapBadge.dataset.state = "";
       refreshAirGap();
     }
-  }, 2500);
+  }, 10000);
 }
 
 window.addEventListener("online", refreshAirGap);
@@ -725,26 +772,21 @@ ui.chatTitle.addEventListener("click", () => {
   if (state.drawer === "chats") renderDrawer();
 });
 
-ui.clear.addEventListener("click", () => {
-  stopGenerating();
-  if (!state.chat) return startNewChat();
-  state.chat.turns = [];
-  db.updateChat(state.chat.id, { turns: [] });
-  renderChat();
-  setNote("Conversation cleared.");
-});
-
 /* =============================================================== drawer === */
 
 const DRAWERS = {
-  chats: "Chats",
+  chats: "History",
   prompts: "Prompts",
   memory: "Memory",
   library: "Library",
   connection: "Connection"
 };
+// A drawer is a panel over the conversation, so opening one returns to the
+// conversation first. Opening History from Settings used to leave the Settings
+// page behind the panel, so closing it landed you somewhere you had left.
 function openDrawer(name) {
   if (state.drawer === name) return closeDrawer();
+  if (state.mode !== "chat") setMode("chat");
   state.drawer = name;
   ui.drawer.hidden = false;
   ui.scrim.hidden = false;
@@ -2375,6 +2417,10 @@ function startProgressPolling() {
 // content area like Orchestration does rather than squeezing beside the chat.
 function setMode(mode) {
   state.mode = mode;
+  // A drawer is a panel over the current view, so changing view closes it.
+  // Leaving it open left two rail buttons lit at once and the chosen view
+  // hidden behind a panel the user then had to dismiss by hand.
+  if (state.drawer) closeDrawer();
   const chat = document.querySelector(".main:not(.workspace)");
   const about = $("about");
   const settings = $("settings");
@@ -2391,8 +2437,11 @@ function setMode(mode) {
   // One header serves every mode, so its middle and trailing controls swap
   // with the mode rather than each pane carrying a header of its own.
   $("chat-picker").hidden = !isChat;
+  // Empty in chat, where the mark and the name are enough: anyone who has
+  // installed this already knows what it is, and the empty state says so again
+  // in larger type. The other modes use it as a label, which is worth having.
   $("brand-sub").textContent = isChat
-    ? "An air-gapped mind that thinks and works with you"
+    ? ""
     : isAbout ? "About Horizon and your privacy"
     : "Settings \u00B7 stored on this computer";
 
@@ -2406,8 +2455,8 @@ function setMode(mode) {
     if (use) use.setAttribute("href", selected ? `#${button.dataset.icon}-on` : `#${button.dataset.icon}`);
   }
 
-  // Settings and About live in the header rather than the rail, so they show
-  // their own pressed state.
+  // Settings has its own toggle rather than "data-mode", so clicking it a
+  // second time returns to chat. About stays in the header.
   $("settings-btn").setAttribute("aria-pressed", String(isSettings));
   $("settings-btn").querySelector("svg use")
     .setAttribute("href", isSettings ? "#i-settings-on" : "#i-settings");
@@ -3287,7 +3336,7 @@ async function submit() {
   // this hardware that wait is several seconds. A visible "thinking" state is
   // the difference between "it is working" and "did that even send?".
   const waiting = el("div", "waiting");
-  waiting.append(icon("i-model-on", "waiting-mark"), el("span", "waiting-text", "Thinking\u2026"));
+  waiting.append(icon("i-orbit", "waiting-mark"), el("span", "waiting-text", "Thinking\u2026"));
   reply.bubble.append(waiting);
 
   const caret = el("span", "caret");
@@ -3823,6 +3872,10 @@ ui.dictateBtn.addEventListener("click", toggleDictation);
 ui.dictationStop.addEventListener("click", () => {
   if (state.dictation.recording) toggleDictation();
 });
+
+// The air-gap badge is a claim about where your data goes, so pressing it
+// shows the evidence rather than repeating the claim.
+ui.airgapBadge.addEventListener("click", openTrafficLog);
 
 /* ================================================================== boot === */
 

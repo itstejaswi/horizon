@@ -558,6 +558,10 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Empty in chat, where the mark and the name say enough. Collapsed rather than
+   left as a blank line, so the lockup centres on the name instead of sitting
+   high in a space nothing occupies. */
+.brand-lockup-sub:empty { display: none; }
 /* The tagline is the first thing to go when the header gets tight. */
 @media (max-width: 1000px) {
   .brand-lockup-sub { display: none; }
@@ -726,12 +730,30 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  /* It is a button now: pressing it opens the request log, which is the
+     evidence for the claim it makes. Styled to look pressable without
+     becoming loud, since it sits in a footer rather than a toolbar. */
+  border: var(--stroke-thin) solid transparent;
+  font-family: inherit;
+  cursor: pointer;
 }
+.badge:hover { border-color: currentColor; }
+.badge:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .badge-icon { width: 14px; height: 14px; }
 /* Both resting states are reassuring: one says it runs here, the other that
    nothing could leave even if it tried. Neither is styled as a warning. */
 .badge[data-state="isolated"] { background: var(--success-bg); color: var(--success-fg); }
 .badge[data-state="online"]   { background: var(--brand-tint); color: var(--brand-fg); }
+/* Once Horizon has fetched something, the badge keeps a quiet mark to say so.
+   Not an alarm - the user asked for it - but the fact should outlast the
+   moment, and the tooltip names what was fetched and when. */
+.badge[data-reached="true"]::after {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex: none;
+}
 
 /* The third state is not a status, it is an event: Horizon is fetching a page
    right now. Modelled on the indicator an operating system shows while the
@@ -1097,21 +1119,45 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   font-variant-numeric: tabular-nums;
 }
 .waiting-mark {
-  width: 18px;
-  height: 18px;
+  /* Larger than a text glyph would be: this is the only thing on screen during
+     a wait that can run to a minute, so it should be legible as a turning
+     orbit rather than read as a dot. */
+  width: 22px;
+  height: 22px;
   flex: none;
   color: var(--brand-fg);
-  animation: waiting-pulse 1.4s var(--curve-ease) infinite;
 }
 
-@keyframes waiting-pulse {
-  0%, 100% { opacity: .35; transform: scale(.9); }
-  50%      { opacity: 1;   transform: scale(1); }
+/* The mark is a world with an orbit around it, so the orbit sweeps while the
+   model works and the world stays put. A pulse only blinked, which reads as
+   waiting for something rather than something under way. */
+.waiting-arc {
+  transform-origin: 50% 50%;
+  /* Not a constant spin: a loading wheel turns evenly and says only "wait".
+     Easing the sweep gives it a sense of effort, which is what is actually
+     happening on the other side of it. */
+  animation: waiting-orbit 2.4s var(--curve-ease) infinite;
+}
+
+@keyframes waiting-orbit {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.waiting-core {
+  transform-origin: 50% 50%;
+  animation: waiting-breathe 2.4s var(--curve-ease) infinite;
+}
+
+@keyframes waiting-breathe {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: 1; }
 }
 
 /* Anyone who finds motion uncomfortable gets a still glyph instead. */
 @media (prefers-reduced-motion: reduce) {
   .waiting-mark { animation: none; opacity: .8; }
+  .waiting-core { animation: none; }
 }
 
 /* Attached files, staged above the composer. Nothing is uploaded: the text is

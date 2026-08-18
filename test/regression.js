@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 /*
  * Local regression suite.
  *
@@ -1119,6 +1119,93 @@ test("dictation: switching it on is a one-time decision", () => {
     "and must say where to switch it on");
   assert.match(app, /if \(!state\.dictation\.enabled\)[\s\S]{0,240}setMode\("settings"\)/,
     "pressing it while off must take the user to the switch");
+});
+
+test("ui: a link is read whatever case it was typed in", () => {
+  const app = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
+
+  // The match is case-insensitive, so the scheme test has to be too. It was
+  // not: "HTTps://example.com" failed a startsWith("http") check and had a
+  // second scheme glued in front of it, producing an address that resolved to
+  // nothing recognisable and an error about a certificate for somewhere else.
+  assert.match(app, /\/\^https\?:\\\/\\\/\/i\.test\(url\)/,
+    "the scheme test must be case-insensitive, like the match that found it");
+  assert.ok(!/url\.startsWith\("http"\)/.test(app),
+    "a case-sensitive startsWith must not decide whether a scheme is present");
+
+  // A failed read must not hand the model a certificate or DNS dump: it names
+  // hosts that have nothing to do with the request, and the model answers
+  // about the wrong thing entirely.
+  assert.match(app, /Could not be read\. Do not guess at what it says\./,
+    "a failed page must be reported plainly to the model");
+  assert.ok(!/--- Could not be read: \$\{error\.message\}/.test(app),
+    "the raw error must not be pasted into the conversation");
+});
+
+test("store: an empty chat is not written down", () => {
+  // A localStorage stand-in that behaves like the real one, so Object.keys
+  // sees the keys the way the erase path expects.
+  class FakeStorage {
+    getItem(k) { return Object.prototype.hasOwnProperty.call(this, k) ? this[k] : null; }
+    setItem(k, v) { this[k] = String(v); }
+    removeItem(k) { delete this[k]; }
+  }
+  global.localStorage = new FakeStorage();
+  global.window = { localStorage: global.localStorage, addEventListener() {} };
+
+  // eslint-disable-next-line no-eval
+  eval(fs.readFileSync(path.join(ROOT, "public", "store.js"), "utf8"));
+  const db = global.window.HorizonStore;
+
+  // An empty chat is an intention, not a record. Writing one down on every
+  // launch left a list of "New chat" entries nobody asked for, and one of them
+  // reappeared immediately after erasing everything.
+  const chat = db.createChat();
+  assert.equal(db.chats().length, 0, "creating a chat must not save an empty one");
+
+  db.createChat();
+  db.createChat();
+  assert.equal(db.chats().length, 0, "nor must pressing the button repeatedly");
+
+  // The first message earns it a place.
+  db.updateChat(chat.id, { turns: [{ role: "user", content: "hello" }] });
+  assert.equal(db.chats().length, 1, "a chat with something in it must be kept");
+  assert.equal(db.chats()[0].id, chat.id, "and must be the chat that was used");
+
+  // Erasing leaves nothing behind, and starting again creates no orphan.
+  db.eraseEverything();
+  assert.equal(db.chats().length, 0, "erasing everything must leave nothing");
+  db.createChat();
+  assert.equal(db.chats().length, 0, "and the next launch must not write one back");
+
+  delete global.localStorage;
+  delete global.window;
+});
+
+test("ui: choosing a view closes whatever panel was open", () => {
+  const app = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
+
+  // A drawer is a panel over the conversation. Leaving it open when the view
+  // changed lit two rail buttons at once and hid the chosen view behind a
+  // panel the user then had to dismiss by hand.
+  const setMode = app.slice(app.indexOf("function setMode(mode)"));
+  assert.match(setMode.slice(0, 400), /if \(state\.drawer\) closeDrawer\(\)/,
+    "changing view must close an open drawer");
+
+  // And the other way: opening History from Settings used to leave the
+  // Settings page behind the panel, so closing it landed you somewhere you
+  // had left rather than back in the conversation.
+  const openDrawer = app.slice(app.indexOf("function openDrawer(name)"));
+  assert.match(openDrawer.slice(0, 400), /if \(state\.mode !== "chat"\) setMode\("chat"\)/,
+    "opening a drawer must return to the conversation it sits over");
+
+  // The two call each other, so the guards matter: setMode only closes a
+  // drawer that is open, and openDrawer only changes a mode that is not
+  // already chat. Without both, they would call back and forth for ever.
+  assert.match(setMode.slice(0, 400), /if \(state\.drawer\)/,
+    "setMode must only close a drawer that is actually open");
+  assert.match(openDrawer.slice(0, 400), /if \(state\.mode !== "chat"\)/,
+    "openDrawer must only change a mode that is not already chat");
 });
 
 test("chat: a reasoning model's working is separated from its answer", () => {

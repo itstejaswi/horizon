@@ -489,7 +489,10 @@ async function streamChat(req, res, body, truncated) {
     if (closed) return;
     return sendJson(res, error.statusCode || 504, {
       error: error.name === "AbortError"
-        ? `Foundry did not respond within ${config.foundry.requestTimeoutMs} ms.`
+        // Said as a limit rather than a fault, because that is what it is. A
+        // long page and a large model can genuinely take longer than this, and
+        // the remedy is in the user's hands.
+        ? `The model did not finish within ${Math.round(config.foundry.requestTimeoutMs / 1000)} seconds. A long page or a large model can need more; try a shorter question, or raise foundry.requestTimeoutMs in config.local.json.`
         : error.message
     });
   }

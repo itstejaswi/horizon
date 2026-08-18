@@ -218,7 +218,7 @@
       <span class="brand-lockup-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#i-mark-sm"/></svg></span>
       <span class="brand-lockup-text">
         <span class="brand-lockup-name">Horizon</span>
-        <span class="brand-lockup-sub" id="brand-sub">An air-gapped mind that thinks and works with you</span>
+        <span class="brand-lockup-sub" id="brand-sub"></span>
       </span>
     </div>
 
@@ -234,10 +234,6 @@
         </button>
         <div class="picker-menu" id="picker-menu" role="listbox" hidden></div>
       </div>
-
-      <button class="btn-icon" id="settings-btn" type="button" title="Settings" aria-label="Settings" aria-pressed="false">
-        <svg><use href="#i-settings"/></svg>
-      </button>
 
       <button class="btn-icon" id="help-btn" type="button" title="About Horizon and your privacy" aria-label="About Horizon and your privacy">
         <svg><use href="#i-help"/></svg>
@@ -267,13 +263,22 @@
     <div class="rail-rule" aria-hidden="true"></div>
 
     <div class="rail-group" id="chat-tools">
-      <button class="rail-btn" data-drawer="chats" data-icon="i-chat" type="button" aria-label="Chats" aria-pressed="false"><svg><use href="#i-chat"/></svg><span class="rail-tip">Chats</span></button>
+      <button class="rail-btn" data-drawer="chats" data-icon="i-history" type="button" aria-label="History" aria-pressed="false"><svg><use href="#i-history"/></svg><span class="rail-tip">History</span></button>
       <button class="rail-btn" data-drawer="prompts" data-icon="i-bookmark" type="button" aria-label="Prompts" aria-pressed="false"><svg><use href="#i-bookmark"/></svg><span class="rail-tip">Prompts</span></button>
       <button class="rail-btn" data-drawer="memory" data-icon="i-brain" type="button" aria-label="Memory" aria-pressed="false"><svg><use href="#i-brain"/></svg><span class="rail-tip">Memory</span></button>
       <button class="rail-btn" data-drawer="library" data-icon="i-library" type="button" aria-label="Library" aria-pressed="false"><svg><use href="#i-library"/></svg><span class="rail-tip">Library</span></button>
     </div>
 
     <div class="rail-spacer"></div>
+
+    <!-- Settings sits at the foot of the rail, next to the only other control
+         that acts on the whole application. Shutting down is the more serious
+         of the two, so a rule keeps it apart from the one above it. -->
+    <div class="rail-group">
+      <button class="rail-btn" id="settings-btn" type="button" aria-label="Settings" aria-pressed="false"><svg><use href="#i-settings"/></svg><span class="rail-tip">Settings</span></button>
+    </div>
+
+    <div class="rail-rule" aria-hidden="true"></div>
 
     <div class="rail-group">
       <button class="rail-btn rail-exit" id="exit-btn" type="button" aria-label="Shut down Horizon"><svg><use href="#i-power"/></svg><span class="rail-tip">Shut down</span></button>
@@ -305,7 +310,7 @@
       <div class="empty" id="empty">
         <div class="empty-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#i-mark"/></svg></div>
         <h1 class="empty-title">Everything here runs on your machine</h1>
-        <p class="empty-sub">No account. No internet. No data leaving this computer.</p>
+        <p class="empty-sub">No account. No telemetry. Nothing leaves this computer unless you ask it to read a page.</p>
         <div class="starters">
           <button class="starter" type="button" data-prompt="Explain what a large language model is, in plain language.">
             <span class="starter-icon"><svg><use href="#i-spark"/></svg></span>
@@ -370,18 +375,13 @@
       </div>
       <div class="composer-foot">
         <span class="foot-note" id="note">Your conversation stays on this machine.</span>
-        <button class="btn-subtle" id="clear" type="button"><svg class="btn-subtle-icon"><use href="#i-broom"/></svg>Clear</button>
       </div>
       <div class="credit">
-        <div class="badge" id="airgap-badge" data-state="pending" title="Network isolation">
+        <button class="badge" id="airgap-badge" data-state="pending" type="button"
+                title="Network isolation">
           <svg class="badge-icon" id="airgap-glyph"><use href="#i-globe"/></svg>
           <span id="airgap-text">Checking</span>
-        </div>
-        <div class="credit-mid">
-          <span class="credit-icon"><svg viewBox="0 0 32 32"><use href="#i-mark-sm"/></svg></span>
-          <span>Horizon &middot; a local model workspace by <strong>Tejaswi</strong></span>
-        </div>
-        <div class="credit-end"></div>
+        </button>
       </div>
     </footer>
 

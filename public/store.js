@@ -92,18 +92,35 @@ const store = {
     return this.chats().find(chat => chat.id === id) || null;
   },
 
+  // Not written to storage until it has something in it. An empty chat is an
+  // intention, not a record: creating one on every launch, and again every time
+  // the plus button is pressed, left a list of "New chat" entries that nobody
+  // asked for and that survived erasing everything. It is saved by the first
+  // message, in updateChat below.
   createChat(title = "New chat") {
-    const chats = this.chats();
-    const chat = { id: newId("c"), title, turns: [], createdAt: Date.now(), updatedAt: Date.now() };
-    chats.unshift(chat);
-    this.save("chats", chats);
-    return chat;
+    return { id: newId("c"), title, turns: [], createdAt: Date.now(), updatedAt: Date.now(), unsaved: true };
   },
 
   updateChat(id, changes) {
     const chats = this.chats();
     const index = chats.findIndex(chat => chat.id === id);
-    if (index === -1) return null;
+
+    // First write of a chat that was never saved. It has content now, so it
+    // earns its place in the list rather than being dropped.
+    if (index === -1) {
+      const chat = {
+        id,
+        title: "New chat",
+        turns: [],
+        createdAt: Date.now(),
+        ...changes,
+        updatedAt: Date.now()
+      };
+      chats.unshift(chat);
+      this.save("chats", chats);
+      return chat;
+    }
+
     chats[index] = { ...chats[index], ...changes, updatedAt: Date.now() };
     // Most recently used first.
     const [moved] = chats.splice(index, 1);
