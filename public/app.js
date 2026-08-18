@@ -410,14 +410,43 @@ function logWire(direction, title, payload, bytes) {
 
 /* ================================================================ render == */
 
+// Emphasis, written into a fragment rather than through innerHTML: everything
+// here arrives from a model, and a model can be talked into emitting markup.
+// Building nodes by hand means a stray tag is text, not structure.
+//
+// Deliberately small. Models reach for **bold** constantly and for little else
+// in ordinary prose, and an unrendered ** is worse than no formatting at all.
+function appendInline(parent, text) {
+  // Bold is matched freely. Single asterisks are only emphasis when they hug
+  // the words they mark: "3 * 4 * 5" is arithmetic, not italics, and a chat
+  // window sees more arithmetic than it sees emphasis.
+  const pattern = /\*\*([^*]+)\*\*|(?<![*\w])\*(\S[^*\n]*\S|\S)\*(?!\w)/g;
+  let last = 0;
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > last) {
+      parent.append(document.createTextNode(text.slice(last, match.index)));
+    }
+    if (match[1] !== undefined) {
+      parent.append(el("strong", null, match[1]));
+    } else {
+      parent.append(el("em", null, match[2]));
+    }
+    last = pattern.lastIndex;
+  }
+
+  if (last < text.length) parent.append(document.createTextNode(text.slice(last)));
+}
+
 function renderInto(container, text) {
   const value = String(text);
 
   // The streaming reveal calls this on every animation frame, so the common
-  // case -- prose with no code fences -- takes a cheap path that leaves the
+  // case -- prose with no markup at all -- takes a cheap path that leaves the
   // DOM alone rather than tearing it down and rebuilding it sixty times a
-  // second.
-  if (!value.includes("`")) {
+  // second. "#" and "-" are cheap to test and rule out headings and rules.
+  if (!/[`*#]/.test(value) && !value.includes("---")) {
     if (container.childNodes.length === 1 && container.firstChild.nodeType === 3) {
       if (container.firstChild.nodeValue !== value) container.firstChild.nodeValue = value;
     } else {
@@ -441,17 +470,89 @@ function renderInto(container, text) {
     } else if (segment.startsWith("`") && segment.endsWith("`") && segment.length > 2) {
       container.append(el("code", null, segment.slice(1, -1)));
     } else {
-      container.append(document.createTextNode(segment));
+      // Headings and rules are line-level, so they are read outside code, where
+      // a leading "#" is a comment and a row of dashes is very often just that.
+      appendBlocks(container, segment);
     }
   }
 }
 
-function splitThinking(text) {
+// Models structure long answers with "### Step 1" and "---" whether or not
+// anyone asked them to. Left alone these print as literal hashes and rows of
+// dashes, which is worse than no structure at all.
+function appendBlocks(container, text) {
+  const lines = text.split("\n");
+  let run = [];
+
+  const flush = () => {
+    if (!run.length) return;
+    appendInline(container, run.join("\n"));
+    run = [];
+  };
+
+  for (const line of lines) {
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    // Three or more dashes on a line of their own. A shorter run, or one with
+    // words beside it, is punctuation rather than a divider.
+    const rule = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line);
+
+    if (heading) {
+      flush();
+      // Capped at h4: these sit inside a message, so a heading must not
+      // outweigh the page around it.
+      const level = Math.min(heading[1].length + 2, 4);
+      const node = el(`h${level}`, "md-h");
+      appendInline(node, heading[2].trim());
+      container.append(node);
+    } else if (rule) {
+      flush();
+      container.append(el("hr", "md-rule"));
+    } else {
+      run.push(line);
+    }
+  }
+
+  flush();
+}
+
+// A tag can be cut in half by the reveal, which advances a few characters at a
+// time. Held back, the fragment costs a frame or two; printed, it shows "<thi"
+// in the bubble and then takes it away again.
+function withoutPartialTag(text, tag) {
+  for (let n = tag.length - 1; n > 0; n--) {
+    if (text.endsWith(tag.slice(0, n))) return text.slice(0, -n);
+  }
+  return text;
+}
+
+// Only trims while more text is still coming: an answer that genuinely ends in
+// "<" keeps it once the reply is complete.
+function splitThinking(text, partial = false) {
+  const hide = part => (partial ? withoutPartialTag(text, part) : text);
+
   const open = text.indexOf("<think>");
-  if (open === -1) return { thinking: "", answer: text };
+  if (open === -1) return { thinking: "", answer: hide("<think>") };
+
   const close = text.indexOf("</think>");
-  if (close === -1) return { thinking: text.slice(open + 7), answer: "" };
+  const body = text.slice(open + 7);
+  if (close === -1) {
+    return {
+      thinking: partial ? withoutPartialTag(body, "</think>") : body,
+      answer: ""
+    };
+  }
   return { thinking: text.slice(open + 7, close), answer: (text.slice(0, open) + text.slice(close + 8)).trim() };
+}
+
+// "Working it out" while it is happening, "Thought for 8s" once it is over: the
+// present tense is a lie the moment the reasoning stops, and on a small model
+// the time it took is worth knowing.
+function thinkingLabel(ms) {
+  if (!ms) return "Working it out";
+  const seconds = ms / 1000;
+  if (seconds < 60) return `Thought for ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `Thought for ${minutes}m ${Math.round(seconds - minutes * 60)}s`;
 }
 
 function createTurn(role, label) {
@@ -546,7 +647,8 @@ function renderChat() {
     if (thinking) {
       const details = el("details", "thinking");
       const summary = el("summary");
-      summary.append(icon("i-spark", "thinking-glyph"), document.createTextNode("Working it out"));
+      summary.append(icon("i-orbit", "thinking-glyph"),
+        document.createTextNode(thinkingLabel(turn.thoughtMs)));
       const body = el("div", null, thinking);
       details.append(summary, body);
       node.bubble.append(details);
@@ -3198,6 +3300,10 @@ async function submit() {
   let firstTokenAt = null;
   let full = "";
   let thinkingBox = null;
+  let thinkingLabelNode = null;
+  let thoughtStartedAt = null;
+  let thoughtMs = 0;
+  let collapsedOnce = false;
   let answerBox = null;
 
   // Foundry delivers a chunk roughly every 150ms containing a couple of tokens.
@@ -3214,17 +3320,39 @@ async function submit() {
 
   const paint = () => {
     const visible = full.slice(0, revealed);
-    const { thinking, answer } = splitThinking(visible);
+    const { thinking, answer } = splitThinking(visible, !streamDone || revealed < full.length);
 
     if (thinking) {
       if (!thinkingBox) {
         thinkingBox = el("details", "thinking");
+        // Open while it is being written, so the wait is filled with the
+        // model's actual working rather than a spinner. It is collapsed once
+        // the answer starts, because by then the answer is what matters.
+        thinkingBox.open = true;
         const summary = el("summary");
-        summary.append(icon("i-spark", "thinking-glyph"), document.createTextNode("Working it out"));
+        thinkingLabelNode = document.createTextNode("Working it out");
+        summary.append(icon("i-orbit", "thinking-glyph"), thinkingLabelNode);
         thinkingBox.append(summary, el("div"));
         reply.bubble.insertBefore(thinkingBox, reply.bubble.firstChild);
       }
       thinkingBox.lastChild.textContent = thinking;
+
+      // The close tag is the honest end of the reasoning. Waiting for the
+      // answer's first character instead would leave the orbit spinning
+      // through the gap between the two.
+      const closed = visible.includes("</think>");
+      thinkingLabelNode.textContent = thinkingLabel(closed ? thoughtMs : 0);
+      // The orbit turns while the reasoning is still arriving, and stops when
+      // it is done: motion means work in progress, nothing else.
+      thinkingBox.classList.toggle("is-live", !closed);
+
+      // Collapsed once, at the moment the reasoning ends, and never again.
+      // Painting runs every frame while the answer reveals, so collapsing on
+      // each pass reached in and shut the box a reader had just opened.
+      if (closed && !collapsedOnce) {
+        collapsedOnce = true;
+        thinkingBox.open = false;
+      }
     }
 
     if (!answerBox) {
@@ -3336,6 +3464,16 @@ async function submit() {
               setNote(`First words in ${((firstTokenAt - started) / 1000).toFixed(1)}s...`);
             }
             full += payload.delta;
+
+            // Timed against arrival rather than the reveal, which lags on
+            // purpose: this is how long the model thought, not how long the
+            // animation took to catch up.
+            if (thoughtStartedAt === null && full.includes("<think>")) {
+              thoughtStartedAt = performance.now();
+            }
+            if (thoughtMs === 0 && thoughtStartedAt !== null && full.includes("</think>")) {
+              thoughtMs = performance.now() - thoughtStartedAt;
+            }
             startReveal();
           }
           if (payload.done) summary = payload;
@@ -3377,7 +3515,14 @@ async function submit() {
     caret.remove();
     const { answer } = splitThinking(full);
 
-    state.chat.turns.push({ role: "assistant", content: full, model: summary.model || state.assistantLabel });
+    state.chat.turns.push({
+      role: "assistant",
+      content: full,
+      model: summary.model || state.assistantLabel,
+      // Kept so a reloaded chat still says how long it thought, rather than
+      // falling back to the present tense for reasoning that finished days ago.
+      ...(thoughtMs ? { thoughtMs: Math.round(thoughtMs) } : {})
+    });
     persistTurns();
     addTools(reply.turn, reply.main, () => answer || full);
     clampIfLong(reply.bubble, reply.main);

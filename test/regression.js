@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 /*
  * Local regression suite.
  *
@@ -1119,4 +1119,143 @@ test("dictation: switching it on is a one-time decision", () => {
     "and must say where to switch it on");
   assert.match(app, /if \(!state\.dictation\.enabled\)[\s\S]{0,240}setMode\("settings"\)/,
     "pressing it while off must take the user to the switch");
+});
+
+test("chat: a reasoning model's working is separated from its answer", () => {
+  const source = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
+
+  const helper = /\/\/ A tag can be cut in half[\s\S]*?\nfunction withoutPartialTag\([\s\S]*?\n\}/.exec(source);
+  assert.ok(helper, "withoutPartialTag must exist");
+  const split = /function splitThinking\([\s\S]*?\n\}/.exec(source);
+  assert.ok(split, "splitThinking must exist");
+
+  const splitThinking = new Function(
+    `${helper[0]}\n${split[0]}\nreturn splitThinking;`)();
+
+  // Nothing to separate: an ordinary model's reply passes straight through.
+  assert.deepEqual(splitThinking("Just an answer."),
+    { thinking: "", answer: "Just an answer." });
+
+  // Qwen3 and friends wrap their working in <think>...</think>, and only the
+  // answer belongs in the bubble.
+  const done = splitThinking("<think>Compare 9.11 and 9.9.</think>\n\n9.9 is larger.");
+  assert.equal(done.thinking, "Compare 9.11 and 9.9.");
+  assert.equal(done.answer, "9.9 is larger.");
+
+  // Mid-stream the block has no end yet, so nothing may leak into the answer.
+  const open = splitThinking("<think>Still working", true);
+  assert.equal(open.answer, "", "an unterminated block must not print as an answer");
+  assert.equal(open.thinking, "Still working");
+
+  // The reveal advances a few characters at a time, so it can land inside a
+  // tag. A half-written tag was printed, then taken away again: visible junk.
+  for (const cut of ["<", "<t", "<th", "<thi", "<thin", "<think"]) {
+    assert.equal(splitThinking(cut, true).answer, "",
+      `a partial opening tag (${cut}) must not be shown`);
+  }
+  for (let n = 1; n < "</think>".length; n++) {
+    const partial = splitThinking("<think>Working" + "</think>".slice(0, n), true);
+    assert.equal(partial.thinking, "Working",
+      "a partial closing tag must not be shown as reasoning");
+  }
+
+  // Once the reply is complete a trailing "<" is just a character.
+  assert.equal(splitThinking("3 < 4").answer, "3 < 4");
+  assert.equal(splitThinking("ends with <").answer, "ends with <");
+});
+
+test("chat: reasoning says how long it took, and survives a reload", () => {
+  const source = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
+
+  const label = /function thinkingLabel\([\s\S]*?\n\}/.exec(source);
+  assert.ok(label, "thinkingLabel must exist");
+  const thinkingLabel = new Function(`${label[0]}\nreturn thinkingLabel;`)();
+
+  // Present tense only while it is actually happening.
+  assert.equal(thinkingLabel(0), "Working it out");
+  assert.equal(thinkingLabel(8200), "Thought for 8.2s");
+  assert.equal(thinkingLabel(45000), "Thought for 45s");
+  // Rolls over to minutes rather than counting to "125s", which nobody reads
+  // as two minutes. A small model on modest hardware does reach that long.
+  assert.equal(thinkingLabel(125000), "Thought for 2m 5s");
+
+  // Timed from arrival, not from the reveal, which lags on purpose.
+  assert.match(source, /thoughtStartedAt === null && full\.includes\("<think>"\)/,
+    "the clock must start when the opening tag arrives");
+  assert.match(source, /full\.includes\("<\/think>"\)/,
+    "the clock must stop when the closing tag arrives");
+
+  // A reloaded chat must not claim to still be working.
+  assert.match(source, /thoughtMs: Math\.round\(thoughtMs\)/,
+    "the duration must be stored on the turn");
+  assert.match(source, /thinkingLabel\(turn\.thoughtMs\)/,
+    "a replayed turn must use its stored duration");
+
+  // The orbit stops at the closing tag, not at the answer's first character:
+  // otherwise it spins through the gap between the two.
+  assert.match(source, /const closed = visible\.includes\("<\/think>"\)/,
+    "the live state must be driven by the closing tag");
+
+  // Painting runs every frame while the answer reveals. Collapsing on each
+  // pass shut the box again a moment after a reader opened it to look.
+  assert.match(source, /if \(closed && !collapsedOnce\) \{\s*\n\s*collapsedOnce = true;/,
+    "the box must collapse once, not on every frame");
+  assert.ok(!/if \(closed && thinkingBox\.open\)/.test(source),
+    "nothing may re-close a box the reader has opened");
+});
+
+test("chat: a model's headings and rules are shown as structure, not as text", () => {
+  const source = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
+
+  const block = /\/\/ Models structure long answers[\s\S]*?\nfunction appendBlocks\([\s\S]*?\n\}/.exec(source);
+  assert.ok(block, "appendBlocks must exist");
+
+  // No DOM here, so the smallest stand-ins that let the real parsing run. What
+  // is under test is which lines become structure, not how they are appended.
+  const harness = `
+    const out = [];
+    const el = (tag, cls) => ({ tag, cls, text: "", append() {} });
+    const appendInline = (node, text) => {
+      if (node.tag) { node.text = text; return; }
+      out.push({ tag: "text", text });
+    };
+    const container = { append: node => out.push(node) };
+    ${block[0]}
+    return text => { out.length = 0; appendBlocks(container, text); return out; };
+  `;
+  const run = new Function(harness)();
+
+  // Headings become headings, and keep their own emphasis.
+  const heads = run("### Step 1\ntext here\n#### Deeper");
+  assert.equal(heads[0].tag, "h4", "### sits inside a message, so it is capped");
+  assert.equal(heads[0].text, "Step 1", "the hashes must not be printed");
+  assert.equal(heads[1].tag, "text");
+  assert.equal(heads[2].tag, "h4");
+
+  // A single hash is still a heading, but never outranks the page around it.
+  assert.equal(run("# Title")[0].tag, "h3");
+  assert.equal(run("## Title")[0].tag, "h4");
+
+  // Three or more dashes alone on a line is a divider.
+  for (const rule of ["---", "----", "***", "___", "  ---  "]) {
+    const parts = run(`before\n${rule}\nafter`);
+    assert.ok(parts.some(p => p.tag === "hr"), `${JSON.stringify(rule)} must be a rule`);
+  }
+
+  // Punctuation and prose must survive untouched: a model writes far more
+  // dashes and hashes than it does structure.
+  for (const plain of ["a - b", "--", "well -- maybe", "C# is a language", "#1 pick", "3 - 2 = 1"]) {
+    const parts = run(plain);
+    assert.ok(!parts.some(p => p.tag === "hr" || String(p.tag).startsWith("h")),
+      `${JSON.stringify(plain)} is prose, not structure`);
+  }
+
+  // Consecutive prose lines stay one run, so paragraphs are not broken up.
+  const prose = run("one\ntwo\nthree");
+  assert.equal(prose.length, 1, "unbroken prose must not be split into pieces");
+  assert.equal(prose[0].text, "one\ntwo\nthree");
+
+  // The cheap path skips all of this, so it must not skip text that needs it.
+  const fast = /if \(!\/\[`\*#\]\/\.test\(value\) && !value\.includes\("---"\)\)/.exec(source);
+  assert.ok(fast, "the fast path must also rule out headings and rules");
 });
