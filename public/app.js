@@ -1337,7 +1337,7 @@ function brandMark(which) {
   wrap.dataset.brand = which;
 
   if (which === "horizon") {
-    wrap.append(icon("i-mark-sm"));
+    wrap.append(icon("i-mark-xs"));
     return wrap;
   }
 
@@ -1614,7 +1614,7 @@ const SETTINGS_SECTIONS = [
     blurb: "Where your chats, prompts and memory are kept, and how to remove them." },
   { id: "foundry", name: "Foundry", icon: "i-foundry",
     blurb: "The service that runs the models. These settings belong to Foundry Local, not to Horizon." },
-  { id: "horizon", name: "Horizon", icon: "i-mark-sm",
+  { id: "horizon", name: "Horizon", icon: "i-mark-xs",
     blurb: "How Horizon starts, and where it lives on this computer." }
 ];
 

@@ -3,12 +3,12 @@
   <!--
     Standalone mark, used as the favicon and anywhere outside the app.
     A solid world with an open orbital arc sweeping around it: everything
-    stays in orbit, nothing escapes.
+    stays in orbit, nothing escapes. Two sparkles sit inside the arc, since
+    what is held here is a mind rather than a planet.
 
-    Two shapes only. The previous mark carried four competing systems and
-    closed into a blob below 32px; this one holds its silhouette at 16px.
-    The break in the arc is asymmetric on purpose, so it does not read as
-    a loading spinner.
+    The previous mark carried four competing systems and closed into a blob
+    below 32px; this one holds its silhouette at 16px. The break in the arc
+    is asymmetric on purpose, so it does not read as a loading spinner.
 
     This version carries its own tile so it is self-contained. Inside the
     app the same geometry is used with the tile colour supplied by CSS.
@@ -20,5 +20,7 @@
       <path d="M16 5.6a10.4 10.4 0 0 1 0 20.8"/>
       <path d="M16 26.4a10.4 10.4 0 0 1-8.6-4.5"/>
     </g>
+    <path d="M7.1 6.0c.34 2.2.62 2.48 2.82 2.82-2.2.34-2.48.62-2.82 2.82-.34-2.2-.62-2.48-2.82-2.82 2.2-.34 2.48-.62 2.82-2.82z" fill="#ffffff"/>
+    <path d="M7.1 13.55c.2 1.3.36 1.46 1.66 1.66-1.3.2-1.46.36-1.66 1.66-.2-1.3-.36-1.46-1.66-1.66 1.3-.2 1.46-.36 1.66-1.66z" fill="#ffffff"/>
   </g>
 </svg>

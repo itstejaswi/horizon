@@ -32,9 +32,11 @@
     <path d="M7.1 6.0c.34 2.2.62 2.48 2.82 2.82-2.2.34-2.48.62-2.82 2.82-.34-2.2-.62-2.48-2.82-2.82 2.2-.34 2.48-.62 2.82-2.82z" fill="currentColor"/>
     <path d="M7.1 13.55c.2 1.3.36 1.46 1.66 1.66-1.3.2-1.46.36-1.66 1.66-.2-1.3-.36-1.46-1.66-1.66 1.3-.2 1.46-.36 1.66-1.66z" fill="currentColor"/>
   </symbol>
-  <!-- Same geometry, marginally heavier, for 24px and below. The smaller
-       sparkle is dropped here: below 24px it fills in and reads as a smudge
-       beside the larger one rather than as a second star. -->
+  <!-- Same geometry, marginally heavier, for the sizes where the full mark's
+       thin strokes start to break up. Both sparkles are kept: the header
+       renders this at 26px, where the second one reads perfectly well. Only
+       below about 18px does it fill in and smudge, and the callers at that size
+       use i-mark-xs instead. -->
   <symbol id="i-mark-sm" viewBox="0 0 32 32">
     <circle cx="16" cy="16" r="6.4" fill="currentColor"/>
     <g fill="none" stroke="currentColor" stroke-width="2.9" stroke-linecap="round">
@@ -42,6 +44,18 @@
       <path d="M16 26.6a10.6 10.6 0 0 1-8.8-4.6"/>
     </g>
     <path d="M7.0 6.6c.44 2.85.8 3.21 3.65 3.65-2.85.44-3.21.8-3.65 3.65-.44-2.85-.8-3.21-3.65-3.65 2.85-.44 3.21-.8 3.65-3.65z" fill="currentColor"/>
+    <path d="M6.9 15.1c.26 1.66.47 1.87 2.13 2.13-1.66.26-1.87.47-2.13 2.13-.26-1.66-.47-1.87-2.13-2.13 1.66-.26 1.87-.47 2.13-2.13z" fill="currentColor"/>
+  </symbol>
+  <!-- For 18px and below, where a second sparkle is a smudge rather than a
+       star. The mark still has to be recognisable at the size of a list icon,
+       so the one that survives is the larger of the two. -->
+  <symbol id="i-mark-xs" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="6.6" fill="currentColor"/>
+    <g fill="none" stroke="currentColor" stroke-width="3.1" stroke-linecap="round">
+      <path d="M16 5.2a10.8 10.8 0 0 1 0 21.6"/>
+      <path d="M16 26.8a10.8 10.8 0 0 1-9-4.7"/>
+    </g>
+    <path d="M7.0 6.4c.46 3.0.84 3.38 3.84 3.84-3.0.46-3.38.84-3.84 3.84-.46-3.0-.84-3.38-3.84-3.84 3.0-.46 3.38-.84 3.84-3.84z" fill="currentColor"/>
   </symbol>
   <!-- Drawn rather than taken from the icon set: a circled question mark is
        simple enough that it needs no dependency, and this keeps the build
