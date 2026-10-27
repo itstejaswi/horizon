@@ -46,6 +46,19 @@ if ($nodeMajor -lt 18) {
 }
 Write-HorizonOk "Node.js $(node --version)"
 
+& node (Join-Path $config.rootDir 'tools\setup-agent-runtime.js') --check
+if ($LASTEXITCODE -ne 0) {
+    Push-Location $config.rootDir
+    try {
+        & npm.cmd install --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw 'Horizon dependency setup failed. Check the error above and retry.' }
+        & node (Join-Path $config.rootDir 'tools\setup-agent-runtime.js')
+        if ($LASTEXITCODE -ne 0) { throw 'Horizon browser setup failed. Check the error above and retry.' }
+    } finally {
+        Pop-Location
+    }
+}
+
 $apiBase = $null
 $modelId = $null
 

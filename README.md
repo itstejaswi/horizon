@@ -2,9 +2,9 @@
 
 # Horizon
 
-A private, air-gapped AI workspace built for **Microsoft Foundry Local**. Chats, saved prompts, memory and a document library — with the runtime managed for you, not left to a terminal.
+A private AI workspace for local chat with **Microsoft Foundry Local**. Chats, saved prompts, memory and a document library — with the runtime managed for you, not left to a terminal. Optional agent tools can access the network or run trusted local programs; those capabilities are off until enabled.
 
-Nothing you type is sent to the internet by Horizon. There is no account to create, no API key, no subscription, and no cloud service involved. Once your models are cached, the whole thing works with the network switched off — and the Connection panel shows you exactly what Horizon can and cannot vouch for.
+Chat and model requests stay on this machine; there is no account, subscription, or cloud inference service. Optional Agents can be configured to use public HTTPS pages or trusted command and MCP executables, which may have external effects. Keep Agents disabled for offline use, and read the access and storage notes below before enabling them.
 
 ## Who this is for
 
@@ -31,7 +31,7 @@ Choose Horizon if you want the opposite trade: one runtime, understood properly,
 - PowerShell 5.1 or later (already included with Windows)
 - Node.js 18 or later
 - Roughly 10 GB of free disk space for the model and its supporting files
-- Internet access **for the one-time setup only**
+- Internet access for one-time setup, and optionally for link reading or Agents/browser tools you choose to use
 - A microphone, only if you want to dictate. That is optional and off by default.
 
 ## Getting started
@@ -102,7 +102,7 @@ cd horizon
 .\"Start Horizon.bat"
 ```
 
-There is no `npm install` step to run by hand. `Start Horizon.bat` fetches what it needs the first time you run it, and a `git clone` needs the usual `npm install` once.
+`Start Horizon.bat` manages dependency installation on first run for both ZIP downloads and Git clones. Running `npm install` by hand is optional.
 
 Dictation is off until you ask for it, because it opens the microphone and holds a second model in memory. Switch it on under **Settings → Behaviour**, or set it in `config.local.json` if you prefer:
 
@@ -125,6 +125,12 @@ That has three consequences worth knowing before you rely on it:
 Two limits are fixed rather than configurable: a single recording stops after five minutes, and an unused speech model is released after five minutes of inactivity. Both are there so a forgotten session cannot hold the microphone open or keep a model in memory.
 
 Speech recognition is **English only**. Foundry ships one streaming model per language, and Horizon uses the English one.
+
+### Read replies aloud
+
+Assistant replies have a **Read aloud** button. **Settings → Behaviour → Read aloud** lets you select a local voice and opt in to automatic reading; automatic reading starts off. Playback stops when you submit another prompt, start dictation, start a new conversation, hide the tab or close it.
+
+This is Windows/browser speech synthesis, **not Foundry Local TTS**. Only voices the browser explicitly identifies as local (`localService: true`) are used. If none are available, Horizon explains why rather than using a cloud or unverified default voice. Voice availability depends on the browser and installed Windows voices. The installed Foundry Local 0.12.1 exposes transcription, but no verified local speech-synthesis interface; cloud Microsoft Foundry Speech is a different service and is not used. Text is split into bounded chunks; over-limit replies fail explicitly rather than being silently cut off.
 
 ### Already extracted without unblocking?
 
@@ -161,6 +167,7 @@ A left rail holds everything, in the way you would expect from a modern chat app
 | **Prompts** | Reusable openings. Pick one and it lands in the message box ready to finish. |
 | **Memory** | Facts you want remembered across every chat, added to the model's instructions each time. Toggle it off whenever you like. |
 | **Library** | Replies you chose to keep, via **Save** under any answer. |
+| **Agents** | Configure local agent runs, tool permissions, workflows and schedules. |
 | **Connection** | The health of every hop, plus the air-gap indicator. |
 | **Traffic** | What was sent and received, at a recording level you choose. |
 | **Settings** | Instructions, creativity, storage usage, and a single button to erase everything. |
@@ -171,9 +178,45 @@ Light, dark, and match-Windows themes are in the top right. Your choice is remem
 
 ### Where your data lives
 
-Chats, prompts, memory and library entries are stored in **this browser's local storage on this machine**. They are never uploaded, and the Horizon server never sees them — it only receives the messages you actually send. Settings shows how much space they occupy, and **Erase all data** removes every trace.
+Chats, prompts, memory and library entries are stored in **this browser's local storage on this machine**. They are never uploaded, and the Horizon server never sees them — it only receives the messages you actually send. Settings shows how much space they occupy, and **Erase all data** removes every trace. Agents are separate: their definitions, settings, permissions, prompts, run history and tool results are stored by the local server in its runtime data file (currently `.runtime/agent-data.json`), not in browser storage. Treat that file as sensitive and do not commit or share it.
 
-Clearing your browser's site data will also delete them, so treat them as convenience rather than an archive.
+The browser-only **Erase all data** control deletes browser-stored chats and related data; it does not erase server-side agent data. **Agents → Settings → Erase agent data** is a separate, destructive action that cancels work, disables execution, and removes agent definitions, permissions, settings and run history. Neither control removes files an agent created or reverses external effects.
+
+### Agents and tool access
+
+**OpenClaw integration status:** OpenClaw is not bundled or connected. The permission-preserving broker and backend routing seam are retained, but no CLI/plugin adapter is wired. Runtime provisioning, adapter implementation and verified integration must happen in a permitted environment and follow device and organisation policies. Do not hand-enable the backend; no OpenClaw selector is exposed. Horizon's native engine is the supported default.
+
+Live activity has distinct local animations for thinking, writing replies, reading/searching files, writing files, browser actions, commands and MCP calls. Tool states come from actual run events, not guesses about the prompt. Approval waits and finished/stopped/error states are still; reduced-motion preferences disable animations throughout these indicators. No GIF downloads, external animation services or additional dependencies are required.
+
+**Ordinary prompts can use tools too.** Open **Agents → Settings**, enable execution and the required feature flags, grant folders/configure trusted executables, and choose the tools under **Tools in the normal conversation**. Then just ask in the usual message box; no saved agent or separate run screen is required. Dictated text follows the same path after you send it. The composer shows **Tools available** when this is enabled, or **Tools off** otherwise.
+
+Conversation tool calls show activity and exact approval previews alongside the reply. Read-only file tools use your folder grant; every other conversation tool needs a one-use approval, even if a saved agent has unattended permission for it. **Stop** cancels the conversation run; page closure also requests cancellation. Completed tool actions are not undone. Runs and results are recorded in **Agents → Activity**, including conversation tool runs; erasing browser chats alone does not remove that history. Settings changes cancel pending work.
+
+The default conversation protocol uses structured JSON actions to accommodate small local models; native tool calls are selectable for compatible models. Protocol errors are shown, never treated as successful actions. Conversation tools use a focused temperature of zero rather than the chat creativity slider. Conversation history is capped at 64 messages / 48,000 serialized JSON characters, with 20,000 characters per message; the complete tool context is capped at 64,000 characters and the model's token limit still applies. These are size limits, not cloud token charges.
+
+#### Experimental native planning and outcome checks
+
+**Agents → Settings → Plan and verify native tasks** is off by default. Leaving it off preserves the existing lightweight model/tool loop. Enabling it adds local inference for model-driven saved agents and conversation runs using Horizon's native engine (with either structured or native tool-call protocol). Fixed workflows and the inactive OpenClaw backend are unchanged.
+
+**Experimental and model-dependent:** JSON planning is not reliable on every local model. Some cached small models may misformat otherwise valid tasks, supply invalid write arguments, mix check parameters into tool arguments, or ask unnecessary clarification. The engine stops and reports problems rather than relaxing validation or verification checks. Successful execution with one compatible model does not establish general model reliability. Fixed workflows remain the predictable option when you already know the required tool arguments.
+
+Planned mode always requests a JSON plan, independent of the agent's tool-call protocol. A single enclosing JSON code fence is accepted only when it wraps the whole response; normalization records a `format` event and does not relax validation. Prose around a fence or malformed data is still rejected. The model first proposes up to the run's `maxSteps` concrete steps, each with a `title`, `tool`, `args` and optional `check`. These are straight-line, known-argument plans, not adaptive branching or full replanning. Arguments may reference an earlier step's structured result with `{"$result":{"step":0,"pointer":"/sha256"}}` (zero-based step index); a check's arguments may also reference its own action's result. The engine resolves references at execution time. It validates the entire plan before executing any step; it may ask the model to repair an initially malformed plan once, before any tool is called. There is no inference retry or replanning after execution begins. **A plan is not permission or approval.** Existing tool grants, roots, feature flags and approval requirements still apply.
+
+- A planned `file_write` gets an automatic fresh readback with SHA-256 comparison through permitted `file_read`. If that read is not allowed, the write plan is rejected before execution.
+- A step can specify a check shaped like `{"tool":"file_read","args":{"path":"C:\\Users\\you\\Documents\\notes.txt"},"pointer":"/content","contains":"expected text"}`. Checks may use only `file_read`, `file_list` or `file_search`, with a JSON pointer and either `equals` (a JSON primitive) or `contains` (a nonempty string). The predicate is evaluated deterministically against a fresh real read result, not a model's assertion.
+- Every actual tool call, including checks, write readbacks and retries, counts against `maxSteps`; a plan must leave room for its required checks and readbacks. Read-only calls may retry once only for explicit transient error codes, using spare capacity after reserving the remaining planned calls. Uncertain side effects are never retried; there is no side-effect replay or automatic resume.
+
+Run cards and inline conversation activity show the saved plan, individual step progress, outcome-check status and any recorded evidence. **Tool succeeded; no outcome check configured** means execution succeeded, not that the requested outcome was proven. **Configured outcome check passed** means only the specified predicate or write readback passed. Overall verification can be passed, partial or not configured; inspect step failures and the run status as well. These bounded checks are not full autonomous semantic verification of user intent. Saved fixed workflows remain literal sequences, not reusable parameterized skills. Small models can still produce poor plans or inadequate checks; review results before relying on them.
+
+Agents are off until enabled. The master switch and individual file, command, browser and MCP flags are separate controls; enabling a feature does not grant every tool. New agents start with read-only file tools. Review the agent's allowed tools and explicitly granted unattended tools before saving. Without fixed workflow steps, actions are model-driven; with steps, the saved sequence runs deterministically and does not ask the model to choose the next action. Steps are JSON objects of the form `{"tool":"file_list","args":{"path":"C:\\Users\\you\\Documents"}}`; file tool paths must be absolute paths under an approved root. The editor provides more argument examples. Each step's tool must also be on the agent's allowed-tools list, and workflow length cannot exceed the configured maximum (up to 32). A scheduled agent must have a default prompt or at least one fixed step. Model support varies, so neither protocol guarantees reliable actions.
+
+File tools can be limited to approved absolute roots. Command and MCP working directories (`cwd`) must also be existing directories under an approved root, but this starting-directory check does **not** sandbox commands, MCP servers or browser actions. Commands and MCP servers run configured trusted executables and can have unrestricted effects outside those roots. The browser uses a fresh isolated context, accesses public HTTPS only, is online, and cannot use personal browser sign-ins. It is not the browser profile Horizon is open in.
+
+Agent schedules are interval-based and persistent. They run only while the server and computer are awake; missed occurrences (including one over 30 seconds late after wake) and overlapping runs are skipped, and interrupted runs are not resumed or replayed. Re-enabling execution resets upcoming times instead of replaying missed schedules. The Agents panel shows server-computed upcoming run times and asks for approval when a run needs it. Run history is bounded to 100 runs / 16 MB, with at most 150 events per run and tool results capped at 12,000 characters. Agent context is limited to 64,000 serialized JSON characters, not tokens; the model's own token context limit also applies. Run the **Stop all** control to cancel active and queued runs and disable agent execution.
+
+Agents continue to use local model inference; enabling network-capable tools does not send inference to a cloud model. However, browser, command and MCP tools may use the network, so a tool-enabled session is **not an air-gap guarantee**. The Connection/privacy status distinguishes local inference from network-capable tools and reports whether external tools are enabled or have been used. Agent history records runs and tool events/results (bounded to 100 runs / 16 MB, with up to 150 events per run); it is **not a network audit log** and does not record every network request made by a command or MCP subprocess. There are no cloud API keys or cloud token charges for Agents; local model usage is still limited by the model's context window.
+
+The browser dependency is provisioned during one-time Horizon setup. MCP servers are external executables: install and maintain each trusted MCP server yourself before configuring it.
 
 ## Everyday use
 
@@ -234,7 +277,8 @@ This is off by default, and the file is readable without Horizon.
 
 The **?** button opens a page that separates three things people usually blur together:
 
-- **Horizon** collects nothing, has no telemetry, and talks to one address: your local Foundry service. The request log, under Settings > Foundry, lets you verify that rather than trust it.
+- **Horizon's chat and model path** collects no telemetry and talks to your local Foundry service. The request log, under Settings > Foundry, lets you inspect that traffic.
+- **Agents** are an optional exception to the local-only network path: the browser tool can visit public HTTPS sites, and configured commands or MCP servers may have unrestricted external effects. Those activities are not represented in the chat request log or air-gap indicator.
 - **Foundry Local** is Microsoft's software. It reaches the internet for models and its catalogue. We observed no other outbound traffic while it sat idle or answered a message, but we cannot prove the absence of telemetry and do not claim to.
 - **The model** has no network access of its own.
 
@@ -245,6 +289,20 @@ npm test
 ```
 
 The regression suite runs entirely on this machine against a stub, so it needs no model, no GPU and no network. It covers config resolution, loopback enforcement, port fallback, path traversal, command injection, streaming, and behaviour when Foundry is not running.
+
+### Opt-in local-agent validation
+
+`npm run test:local-agent` exercises experimental native planning against a real local model and can take several minutes. First load your chosen cached model yourself. Set the endpoint to your running Foundry service's actual loopback port and the model to its actual loaded ID from the cache list; replace both placeholders below:
+
+```powershell
+$env:HORIZON_AGENT_TEST_BASE_URL = "http://127.0.0.1:<actual-port>/v1"
+$env:HORIZON_AGENT_TEST_MODEL = "<actual-loaded-model-id-from-cache-list>"
+npm run test:local-agent
+```
+
+The test never loads or downloads models and does not change your real settings. It creates a synthetic temporary source file and isolated test settings, then asks the model to read the source, create a copy using a content result reference, and overwrite the source using a hash result reference. It checks the exact arguments before approving each write, verifies both writes through independent readback, checks that neither write was replayed, and cleans up its test files and state.
+
+Planning remains experimental and model-dependent: passing this bounded synthetic test is not a general reliability guarantee or proof that arbitrary user intent is fulfilled.
 
 ## The four scripts
 
@@ -387,9 +445,9 @@ Click the panel icon in the top right. It has three tabs, and its purpose is to 
 
 Shows the health of every hop in the chain — browser → local web server → Foundry service → model — each with its own state, address, and response time. When something breaks, you can see exactly which link failed instead of guessing.
 
-Above it sits the **air-gap indicator**. When your machine has no network, it says so plainly: nothing could leave this computer even if it tried. This is detected **passively** from the browser's own connectivity signal; Horizon never makes an outbound request to test for internet, because doing so would defeat the entire point.
+Above it sits the **air-gap indicator**. It detects connectivity **passively** from the browser's own signal; Horizon never makes an outbound request just to test for internet. This indicator describes the browser's connectivity, not whether an agent tool or configured program is attempting network access.
 
-The same badge doubles as an **activity light**. Horizon reaches the internet for exactly one reason — fetching a page you asked it to read — and while that fetch is happening the badge turns amber, pulses, and names the host: *Reading example.com*. It works the way your operating system shows an indicator while the camera or microphone is live. Nothing leaves this machine without lighting it up.
+The same badge doubles as an **activity light** for Horizon's link-reading feature. While a page you asked it to read is being fetched, the badge turns amber, pulses, and names the host: *Reading example.com*. Agent browser requests, commands and MCP network activity do not use that indicator.
 
 To be precise about what is happening: the **model** has no network access at all. Horizon fetches the page and hands the text over. The badge reports Horizon reaching out, not the model.
 
@@ -444,7 +502,7 @@ To make the change permanent, edit `model.alias` in `config.json`.
 
 ### What Horizon promises
 
-Horizon sends nothing outward. Every request it makes goes to `127.0.0.1`, and the request log under Settings > Foundry lets you verify that message by message. It collects **no telemetry** and has **no analytics**.
+With Agents disabled and link reading off, Horizon's chat/model requests go to `127.0.0.1`, and the request log under Settings > Foundry shows those requests. Agents can access public HTTPS pages; configured commands and MCP servers can also perform external network activity. That activity is not covered by the chat request log or air-gap indicator. Disable Agents and do not run externally connected tools when you need a genuinely offline session. Horizon collects **no telemetry** and has **no analytics**.
 
 It does not control Foundry Local or the model itself — those are separate processes. For how they handle the network, check your Foundry configuration and [Microsoft's documentation](https://learn.microsoft.com/en-us/azure/foundry-local/).
 
@@ -456,7 +514,7 @@ It does not control Foundry Local or the model itself — those are separate pro
 4. Disconnect the network, or apply your organisation's approved isolation.
 5. Run `Start-Horizon.ps1` again. It should still answer.
 
-Open the control panel and look at the Connection tab: the indicator will read **Fully offline**, and every hop will show a `127.0.0.1` address. The Traffic tab lets you confirm, message by message, that nothing goes anywhere else.
+Before disconnecting, disable agent execution, cancel active runs with **Stop all**, turn off link reading, and make sure no configured command or MCP process is relying on the network. The Connection tab reports the chat/model path; it does not monitor agent tools. When those agent paths are idle, the panel's **Fully offline** indicator and Traffic tab describe the local chat path only.
 
 Being local does not exempt you from your organisation's data-handling rules. Do not enter customer, patient, confidential, or otherwise regulated information unless that use has been explicitly approved.
 
@@ -475,6 +533,10 @@ src/reader.js             fetching a pasted page, and blocking private addresses
 src/server.js             the web server and local API
 public/index.html         page structure and the inline icon set (generated)
 public/app.css            Fluent 2 design tokens, light and dark
+public/agents.js          optional agent controls and local API client
+public/agents.css         Agents panel styling using Horizon theme tokens
+public/chat-tools.js      conversational tool activity, approvals and cancellation
+public/speech.js          optional verified-local browser voice playback
 public/app.js             chat, streaming, drawers, model picker, settings
 public/store.js           local storage for chats, prompts, memory and library
 public/manifest.webmanifest  lets the page install as an app
@@ -521,9 +583,10 @@ Microsoft, Azure, Foundry and Foundry Local are trademarks of the Microsoft grou
 - `/api/status` and `/api/diagnostics` genuinely query Foundry rather than assuming everything is fine.
 - Model names sent from the browser are validated against a strict pattern and passed as separate process arguments, never interpolated into a shell string.
 - The air-gap indicator is passive; it never makes a network request.
-- Claims are scoped: Horizon speaks for its own traffic only, and points to Microsoft's documentation for Foundry Local.
+- The air-gap indicator and Foundry request log cover the chat/model path, not network activity initiated by Agents, commands or MCP servers.
+- Agent definitions and run history are stored server-side in local runtime data and may contain private prompts and tool results.
 - The conversation lives in the browser tab's memory and is never written to disk.
-- No analytics, telemetry, remote fonts, CDN assets, or third-party libraries. There are zero runtime dependencies; only Node.js built-in modules are used.
+- No analytics, telemetry, remote fonts or CDN assets. The base chat UI uses local assets; agent browser execution relies on a separately provisioned browser dependency.
 
 > Foundry Local and its REST API are preview features. Review the Microsoft documentation before relying on this for production workloads.
 

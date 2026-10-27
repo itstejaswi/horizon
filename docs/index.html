@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Horizon — a private AI workspace built for Microsoft Foundry Local</title>
-<meta name="description" content="An air-gapped AI workspace for Windows. Chats, saved prompts, memory and a document library, with Microsoft Foundry Local managed for you. No account, no telemetry, no cloud.">
+<meta name="description" content="A local-first personal AI tool for Windows. Chats, memory, optional tools and scheduled agents, with Microsoft Foundry Local managed for you. No paid inference API.">
 <meta name="color-scheme" content="dark">
 
 <meta property="og:title" content="Horizon — your models, running on your machine">
-<meta property="og:description" content="A private, air-gapped AI workspace built for Microsoft Foundry Local.">
+<meta property="og:description" content="A local-first personal AI tool with optional agents and automations, built for Microsoft Foundry Local.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://itstejaswi.github.io/horizon/assets/social-preview.jpg">
 
@@ -68,9 +68,10 @@
       </g>
     </svg>
     <h1>Your models,<br>running on your machine.</h1>
-    <span class="hero-claim">No account · No internet · No data leaving your system</span>
-    <p>A private, air-gapped AI workspace built for Microsoft Foundry Local — chat,
-       documents, prompts, memory and models, running entirely on your own hardware.</p>
+    <span class="hero-claim">Local inference · No paid inference API · Optional tools, off by default</span>
+    <p>A local-first personal AI tool built for Microsoft Foundry Local — chat,
+       documents, prompts, memory, reusable agents and scheduled workflows.
+       Local inference stays on your hardware; enabled external tools may use the network.</p>
     <div class="cta">
       <a class="btn btn-primary" href="https://github.com/itstejaswi/horizon">View on GitHub</a>
       <a class="btn btn-ghost" href="#install">How to install</a>
@@ -91,7 +92,8 @@
           </svg>
           Nothing is collected
         </h3>
-        <p>No telemetry, no analytics, no account, no API key.</p>
+        <p>No telemetry, analytics or Horizon account. Local inference needs no API key.
+           External integrations may require their own sign-in.</p>
       </div>
       <div class="card card-accent">
         <h3>
@@ -101,8 +103,9 @@
           </svg>
           You can watch it
         </h3>
-        <p>Every request is logged, in full, where you can read it. They all go to
-           <code>127.0.0.1</code>.</p>
+        <p>The configurable Traffic log shows chat exchanges with
+           <code>127.0.0.1</code>. Agents records bounded tool-call history on disk.
+           Neither is a system-wide network audit.</p>
       </div>
       <div class="card card-accent">
         <h3>
@@ -113,7 +116,9 @@
           Your voice stays here
         </h3>
         <p>Dictation runs on a speech model on this machine. What you say lands in the
-           message box for you to read before anything is sent.</p>
+           message box for you to read before anything is sent. Replies can be read
+           aloud using verified-local Windows/browser voices, with automatic reading
+           off by default and no cloud voice fallback.</p>
       </div>
       <div class="card card-accent">
         <h3>
@@ -122,10 +127,11 @@
             <path d="M10 2.6v14.8M2.6 10h14.8"/>
             <path d="M10 2.6c2 2.1 3.1 4.7 3.1 7.4s-1.1 5.3-3.1 7.4c-2-2.1-3.1-4.7-3.1-7.4S8 4.7 10 2.6z"/>
           </svg>
-          One thing leaves, and it announces itself
+          External capabilities are your choice
         </h3>
-        <p>Reading a page you asked for is the only outbound act. The badge turns amber
-           and names the host while it happens. Otherwise, pull the cable and carry on.</p>
+        <p>Link reading, browser automation, configured commands and MCP servers can
+           use the network when enabled. Keep them off for local-only work.
+           File workflows can run without a model or network.</p>
       </div>
     </div>
   </div>
@@ -225,9 +231,29 @@
     </div>
     <p class="lede" style="margin-top:26px">Foundry picks a new port on every restart.
        Horizon finds it again mid-session, without losing your conversation.</p>
-    <p class="lede">Speech takes the second branch because Foundry offers it only as a
+    <p class="lede">Dictation takes the second branch because Foundry offers it only as a
        command, not over HTTP. Foundry opens the microphone, not the page, so your
        browser shows no recording indicator — Horizon shows its own.</p>
+    <p class="lede">Ordinary prompts can use permitted tools directly, with inline activity
+       and per-call approval for anything beyond read-only file access. Configure access
+       once in Agents settings; no saved agent is needed for conversation tools.</p>
+    <p class="lede">Optional agents add a bounded tool-execution loop, fixed workflows,
+       approvals and persistent interval schedules. The local server must remain running
+       and the computer awake. Missed runs are skipped, not replayed. Agent settings and
+       run history are stored on disk, separately from browser chat data.</p>
+    <p class="lede">Experimental native planning is opt-in and model-dependent: it persists
+       concrete steps and supports independent file readback and predicate checks on fresh
+       read results. Only explicitly transient read-only failures may retry once, within
+       the run's call budget. Existing permissions and approvals are unchanged. This is
+       not adaptive replanning or general semantic proof that a request was fulfilled.</p>
+    <p class="lede">OpenClaw is not bundled or connected. The permission-preserving broker
+       and backend routing seam are retained, but no CLI/plugin adapter is wired.
+       Runtime provisioning, adapter implementation and verified integration must happen
+       in a permitted environment and follow device and organisation policies.
+       Horizon's native engine is the supported default.</p>
+    <p class="lede">Read aloud uses local voices exposed by Windows and your browser,
+       not a Foundry Local TTS endpoint. Foundry Local 0.12.1 provides transcription;
+       cloud Microsoft Foundry Speech is a separate service and is not used.</p>
   </div>
 </section>
 
@@ -340,10 +366,11 @@ winget install OpenJS.NodeJS.LTS</pre>
             <pre>git clone https://github.com/itstejaswi/horizon
 cd horizon
 .\"Start Horizon.bat"</pre>
-            <p class="note">One dependency: <a href="https://github.com/microsoft/node-pty">node-pty</a>,
-               which opens a terminal for the speech command and does nothing else. It
-               arrives ready-built for Windows — no compiler, no build tools, nothing to
-               set up.</p>
+            <p class="note">Initial setup installs <code>node-pty</code> (the speech terminal
+               dependency), Playwright and its isolated Chromium browser.
+               The custom MCP client ships as source with Horizon; it is not installed separately.
+               Features remain off until enabled. Configured third-party MCP servers
+               are separate programs with their own installation requirements.</p>
           </div>
         </div>
 
@@ -376,11 +403,11 @@ npm run build</pre>
       <tr><th>Requirement</th><th>Detail</th></tr>
       <tr><td>Windows</td><td>Windows 10 or Windows 11, on Intel/AMD or Arm. macOS support is <a href="https://github.com/itstejaswi/horizon/milestone/1">on the roadmap</a>, not here yet.</td></tr>
       <tr><td>PowerShell</td><td>5.1 or later — already included with Windows</td></tr>
-      <tr><td>Node.js</td><td>18 or later. The one dependency ships ready-built, so <code>npm install</code> compiles nothing.</td></tr>
+      <tr><td>Node.js</td><td>18 or later. Setup installs bundled runtime dependencies and Chromium.</td></tr>
       <tr><td>Foundry Local</td><td>Installed separately. Horizon starts and stops it, but does not install it.</td></tr>
       <tr><td>RAM</td><td>Minimum 8 GB.</td></tr>
-      <tr><td>Disk</td><td>200 MB for Horizon and its runtime, plus 700 MB for the speech model if you want dictation, plus the size of the model you choose.</td></tr>
-      <tr><td>Internet</td><td>To install, and to download each model once.</td></tr>
+      <tr><td>Disk</td><td>Allow space for npm dependencies, Chromium, any speech model, and the local models you choose. Browser setup increases the application footprint.</td></tr>
+      <tr><td>Internet</td><td>For initial dependency/browser setup and model downloads; also for any external capabilities you enable.</td></tr>
       <tr><td>Microphone</td><td>Only for dictation. Off until you switch it on.</td></tr>
     </table>
   </div>

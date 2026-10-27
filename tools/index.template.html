@@ -10,6 +10,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0d1015">
   <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/agents.css">
 </head>
 <body>
 
@@ -68,6 +69,7 @@
          health all moved into Settings. -->
     <div class="rail-group rail-modes">
       <button class="rail-btn" data-mode="chat" data-icon="i-chat" type="button" aria-label="Chat" aria-pressed="true"><svg><use href="#i-chat-on"/></svg><span class="rail-tip">Chat</span></button>
+      <button class="rail-btn" id="agents-btn" type="button" aria-label="Agents" aria-haspopup="dialog" aria-expanded="false" aria-pressed="false"><svg><use href="#i-spark"/></svg><span class="rail-tip">Agents</span></button>
     </div>
 
     <div class="rail-rule" aria-hidden="true"></div>
@@ -120,7 +122,7 @@
       <div class="empty" id="empty">
         <div class="empty-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#i-mark"/></svg></div>
         <h1 class="empty-title">Everything here runs on your machine</h1>
-        <p class="empty-sub">No account. No telemetry. Nothing leaves this computer unless you ask it to read a page.</p>
+        <p class="empty-sub">No account. No telemetry. Model inference stays local; optional link reading and external agent tools can use the network.</p>
         <div class="starters">
           <button class="starter" type="button" data-prompt="Explain what a large language model is, in plain language.">
             <span class="starter-icon"><svg><use href="#i-spark"/></svg></span>
@@ -185,6 +187,7 @@
       </div>
       <div class="composer-foot">
         <span class="foot-note" id="note">Your conversation stays on this machine.</span>
+        <button class="btn-subtle" id="chat-tools-settings" type="button" title="Configure tools and permissions in Agents settings">Tools off</button>
       </div>
       <div class="credit">
         <button class="badge" id="airgap-badge" data-state="pending" type="button"
@@ -211,6 +214,19 @@
 
 <div class="scrim" id="scrim" hidden></div>
 
+<div class="agent-scrim" id="agents-modal" hidden>
+  <section class="agent-dialog" role="dialog" aria-modal="true" aria-labelledby="agents-title" tabindex="-1">
+    <header class="agent-header">
+      <div>
+        <h1 id="agents-title">Agents</h1>
+        <p>Configure local automations and review their activity.</p>
+      </div>
+      <button class="btn-icon" id="agents-close" type="button" aria-label="Close Agents" title="Close"><svg><use href="#i-dismiss"/></svg></button>
+    </header>
+    <div id="agents-content" class="agent-content"></div>
+  </section>
+</div>
+
 <!-- Safe exit: releases the model from memory and stops the local server. -->
 <div class="modal-scrim" id="exit-scrim" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="exit-title">
@@ -234,7 +250,10 @@
 </div>
 
 <script src="/store.js"></script>
+<script src="/activity.js"></script>
+<script src="/chat-tools.js"></script>
 <script src="/app.js"></script>
+<script src="/agents.js"></script>
+<script src="/speech.js"></script>
 </body>
 </html>
-

@@ -1121,6 +1121,108 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   align-items: center;
   gap: var(--sp-mnudge);
 }
+.waiting::after {
+  content: attr(data-elapsed);
+  color: var(--fg-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.horizon-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fg-3);
+  font-size: 13px;
+  line-height: 24px;
+}
+.activity-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  color: var(--brand-fg);
+}
+.activity-mark i {
+  display: block;
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  border-radius: 50%;
+}
+[data-phase="planning"] .activity-mark i,
+[data-phase="verifying"] .activity-mark i { animation: activity-breathe 1.8s ease-in-out infinite alternate; }
+[data-phase="verifying"] .activity-mark i { height: 14px; border-radius: 2px; }
+.agent-plan { margin: 12px 0; padding: 12px; border: 1px solid var(--fg-3); border-radius: 8px; }
+.agent-plan[hidden] { display: none; }
+.agent-plan-steps { margin: 10px 0; padding-left: 24px; }
+.agent-plan-step + .agent-plan-step { margin-top: 12px; }
+.agent-plan-check, .agent-verification { display: block; margin-top: 4px; }
+.agent-plan-detail { margin-top: 6px; }
+[data-phase="thinking"] .activity-mark { animation: activity-turn 3s linear infinite; }
+[data-phase="thinking"] .activity-mark i {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  animation: activity-breathe 1.8s ease-in-out infinite alternate;
+}
+[data-phase="thinking"] .activity-mark i:nth-child(1) { transform: translateY(-7px); }
+[data-phase="thinking"] .activity-mark i:nth-child(2) { transform: translate(-6px, 4px); animation-delay: .3s; }
+[data-phase="thinking"] .activity-mark i:nth-child(3) { transform: translate(6px, 4px); animation-delay: .6s; }
+[data-phase="reading"] .activity-mark i,
+[data-phase="answering"] .activity-mark i {
+  height: 14px;
+  border-radius: 2px;
+  animation: activity-bars 1s ease-in-out infinite alternate;
+}
+[data-phase="reading"] .activity-mark i:nth-child(2),
+[data-phase="answering"] .activity-mark i:nth-child(2) { animation-delay: .2s; }
+[data-phase="reading"] .activity-mark i:nth-child(3),
+[data-phase="answering"] .activity-mark i:nth-child(3) { animation-delay: .4s; }
+[data-phase="writing"] .activity-mark { animation: activity-write 1.2s ease-in-out infinite; }
+[data-phase="writing"] .activity-mark i { width: 4px; height: 16px; border-radius: 1px; transform: rotate(35deg); }
+[data-phase="writing"] .activity-mark i:not(:first-child) { display: none; }
+[data-phase="browsing"] .activity-mark {
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  animation: activity-turn 2.5s linear infinite;
+}
+[data-phase="browsing"] .activity-mark i:first-child { width: 10px; height: 20px; border: 1px solid currentColor; background: none; }
+[data-phase="browsing"] .activity-mark i:not(:first-child) { display: none; }
+[data-phase="command"] .activity-mark i,
+[data-phase="connecting"] .activity-mark i,
+[data-phase="acting"] .activity-mark i { animation: activity-breathe .8s ease-in-out infinite alternate; }
+[data-phase="command"] .activity-mark i:first-child { width: 9px; height: 9px; border-top: 2px solid currentColor; border-right: 2px solid currentColor; border-radius: 0; background: none; transform: rotate(45deg); }
+[data-phase="command"] .activity-mark i:nth-child(2) { width: 7px; height: 2px; border-radius: 0; align-self: flex-end; margin-bottom: 5px; }
+[data-phase="command"] .activity-mark i:nth-child(3) { display: none; }
+[data-phase="connecting"] .activity-mark i:nth-child(2) { width: 8px; height: 2px; }
+[data-phase="connecting"] .activity-mark i:nth-child(3) { animation-delay: .4s; }
+[data-phase="approval"] .activity-mark i { width: 4px; height: 13px; border-radius: 1px; }
+[data-phase="approval"] .activity-mark i:nth-child(3) { display: none; }
+[data-phase="queued"] .activity-mark { opacity: .6; }
+[data-phase="completed"] .activity-mark i:first-child { width: 7px; height: 13px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; background: none; border-radius: 0; transform: translateY(-2px) rotate(45deg); }
+[data-phase="completed"] .activity-mark i:not(:first-child) { display: none; }
+[data-phase="failed"] .activity-mark i,
+[data-phase="cancelled"] .activity-mark i,
+[data-phase="interrupted"] .activity-mark i,
+[data-phase="skipped"] .activity-mark i,
+[data-phase="stopping"] .activity-mark i { width: 10px; height: 10px; border-radius: 2px; }
+[data-phase="failed"] .activity-mark i:not(:first-child),
+[data-phase="cancelled"] .activity-mark i:not(:first-child),
+[data-phase="interrupted"] .activity-mark i:not(:first-child),
+[data-phase="skipped"] .activity-mark i:not(:first-child),
+[data-phase="stopping"] .activity-mark i:not(:first-child) { display: none; }
+@keyframes activity-turn { to { transform: rotate(360deg); } }
+@keyframes activity-breathe { from { opacity: .35; } to { opacity: 1; } }
+@keyframes activity-bars { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
+@keyframes activity-write { 0%, 100% { transform: translateX(-3px); } 50% { transform: translateX(3px); } }
+@media (prefers-reduced-motion: reduce) {
+  .horizon-activity .activity-mark,
+  .horizon-activity .activity-mark i { animation: none; }
+}
 .waiting-text {
   font-size: 14px;
   line-height: 20px;
@@ -1140,7 +1242,7 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 /* The mark is a world with an orbit around it, so the orbit sweeps while the
    model works and the world stays put. A pulse only blinked, which reads as
    waiting for something rather than something under way. */
-.waiting-arc {
+.waiting-mark .waiting-arc {
   transform-origin: 50% 50%;
   /* Not a constant spin: a loading wheel turns evenly and says only "wait".
      Easing the sweep gives it a sense of effort, which is what is actually
@@ -1153,7 +1255,7 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   to   { transform: rotate(360deg); }
 }
 
-.waiting-core {
+.waiting-mark .waiting-core {
   transform-origin: 50% 50%;
   animation: waiting-breathe 2.4s var(--curve-ease) infinite;
 }
@@ -1166,7 +1268,7 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 /* Anyone who finds motion uncomfortable gets a still glyph instead. */
 @media (prefers-reduced-motion: reduce) {
   .waiting-mark { animation: none; opacity: .8; }
-  .waiting-core { animation: none; }
+  .waiting-core, .waiting-arc { animation: none; }
 }
 
 /* Attached files, staged above the composer. Nothing is uploaded: the text is

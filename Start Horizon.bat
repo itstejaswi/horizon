@@ -42,20 +42,23 @@ if %NODE_MAJOR% LSS 18 (
   exit /b 1
 )
 
-rem  Dictation needs node-pty, which is a real dependency rather than an
-rem  optional one: a feature nobody knows to install is a feature nobody uses.
-rem  Fetching it here means the ZIP download works the same as a git clone,
-rem  without asking anyone to open a terminal first.
-if not exist "node_modules\node-pty" (
+rem  Check all bundled dependencies, including upgrades of an existing copy.
+node "tools\setup-agent-runtime.js" --check
+if errorlevel 1 (
   echo   Setting up, one moment. This happens once.
   echo.
   call npm install --no-audit --no-fund
   if errorlevel 1 (
     echo.
-    echo   Setup did not finish. Horizon still runs and chat works normally;
-    echo   speaking instead of typing will not be available.
+    echo   Setup did not finish. Check the error above, then retry.
     echo.
-    timeout /t 5 >nul
+    pause
+    exit /b 1
+  )
+  node "tools\setup-agent-runtime.js"
+  if errorlevel 1 (
+    pause
+    exit /b 1
   )
   echo.
 )

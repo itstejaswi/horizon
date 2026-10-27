@@ -42,3 +42,21 @@ the destination, and is not a claim of affiliation or endorsement.
 
 Models downloaded through Foundry Local carry their own licences, shown
 in the model catalogue under Settings.
+
+The optional agent tools use these open-source runtime dependencies,
+installed by npm with their own licence files:
+
+    Playwright (Apache License 2.0)
+    https://github.com/microsoft/playwright
+
+    node-pty (MIT License)
+    https://github.com/microsoft/node-pty
+
+Setup downloads Playwright's Chromium browser to the user's browser cache.
+Chromium is separate software with its own third-party notices and licences:
+
+    https://www.chromium.org/chromium-projects/
+
+Tool-server software configured by the user is separate from Horizon and
+retains its own licences, permissions and privacy terms. These integrations
+do not imply affiliation with, or endorsement by, their respective owners.

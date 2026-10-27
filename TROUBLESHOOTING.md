@@ -115,6 +115,71 @@ The page rechecks automatically every twenty seconds.
 
 The Node.js server has stopped. Look at the PowerShell window that started it — if it has closed or shows an error, run `Start-Horizon.ps1` again.
 
+## Conversation tools and read aloud
+
+### Normal prompts are not using tools
+
+Check **Agents → Settings**: execution, a feature flag, and **Let ordinary chat prompts use tools** must all be on, and at least one conversation tool must be allowed. The composer should show **Tools available**. Grant actual folders and configure fixed command/MCP IDs before asking the model to use them; it cannot invent executable configurations. No saved agent is required.
+
+If a model cannot follow the structured action protocol, choose another model or the native protocol for a model that supports function calls. Errors are explicit. Side effects wait for approval inside the conversation; read-only file access uses your scoped grant. **Stop** cancels the run. Reloaded chats retain replies, while detailed execution history remains in **Agents → Activity**. Long histories/attachments may exceed the conversation limit; shorten them or start a new chat.
+
+### Planned runs are slow, rejected or only partially verified
+
+**Agents → Settings → Plan and verify native tasks** adds local inference before native-engine model-driven agents or conversations execute. It is off by default; turn it off to retain the lightweight loop. Fixed workflows are unaffected. A malformed initial plan can be repaired once before tools run; an invalid plan is rejected before execution. Planning does not grant tools or replace approval.
+
+Planning is **experimental and model-dependent**. Some cached small models misformat valid tasks, supply invalid write arguments, put check parameters into tool arguments, or ask unnecessary clarification. The engine stops and reports problems rather than relaxing checks. Review the error or clarification, try a more capable compatible model, or use a fixed workflow with known tool arguments for predictable execution. A successful run with one model does not guarantee reliability across models or tasks.
+
+Planned mode always uses JSON regardless of the agent's protocol. A single enclosing JSON code fence wrapping the whole response is accepted and recorded as a `format` event; full validation still applies. Prose around fences and malformed data remain rejected. Plans are straight-line sequences with known arguments, optionally using prior structured-result references such as `{"$result":{"step":0,"pointer":"/sha256"}}`; a check may also reference its own action's result. It does not adaptively branch, replan after execution begins, or retry inference. Every actual call, including checks, write readbacks and retries, uses the `maxSteps` budget. Increase that limit if required checks/readbacks do not fit; a transient read-only retry is allowed only with spare capacity after reserving all remaining planned calls.
+
+For planned writes, allow both `file_write` and `file_read` for the target under an approved root. The engine requires permitted readback for SHA-256 verification, so a write plan without that access is rejected before any step executes. Optional checks must use permitted `file_read`, `file_list` or `file_search` calls and valid JSON-pointer `equals`/`contains` predicates on fresh read results.
+
+Inspect the saved plan and evidence in the run card or inline tool activity. A successful tool without a configured outcome check is **not** a verified outcome. Passed checks cover only their predicates or write readback, not the entire user request; partial verification does not mean every step passed a check. Always inspect the run status and individual failures. Only explicitly transient read-only failures may retry once. Side effects are not replayed and interrupted runs do not auto-resume; inspect existing effects before manually starting another run.
+
+### OpenClaw is unavailable
+
+OpenClaw is not bundled or connected. The permission-preserving broker and backend routing seam are retained, but no CLI/plugin adapter is wired. Runtime provisioning, adapter implementation and verified integration must happen in a permitted environment and follow device and organisation policies. Do not hand-enable the backend or bypass those policies. Use Horizon's native engine, the supported default.
+
+### Read aloud is unavailable or silent
+
+Use the reply's **Read aloud** button or **Settings → Behaviour → Read aloud**. Only voices explicitly marked local by the browser are eligible. Install a Windows speech voice and use a browser that exposes it; a cloud-only voice is deliberately not a fallback. Automatic reading is opt-in. Hiding the tab, starting a new prompt/dictation, or closing the page stops playback.
+
+Read aloud uses Windows/browser speech synthesis, not Foundry Local. Foundry Local 0.12.1 has transcription but no verified local TTS interface in this build. Cloud Microsoft Foundry Speech is not configured or called. Playback/storage failures are shown in the page; browser data erasure resets the voice preference and automatic-reading switch.
+
+## Agents cannot load or save
+
+The Agents panel requires a server that implements the `/api/agents` endpoints. If the panel reports a not-found or unavailable error, update to a build with the Agents backend rather than editing `public/index.html`; it is generated from `tools/index.template.html`.
+
+The API uses a per-session token and checks the request origin. Use the Horizon page opened by its launcher, and reload the page if a save or approval reports an invalid or expired token. The panel displays server errors as returned; if an action's outcome is uncertain, refresh the panel and inspect recent runs before trying it again.
+
+## An agent is waiting for approval or has stopped
+
+Runs that need a tool decision appear as **awaiting approval** with the exact tool arguments for review. Approve only when the action is understood; otherwise deny it. Use **Cancel run** to stop one run or **Stop all** to cancel every run and disable agent execution.
+
+Scheduled runs require both the server and computer to remain awake. A missed interval (including a run more than 30 seconds late after wake) or overlapping occurrence is marked **skipped** and is not replayed; an interrupted run is not resumed after restart. Re-enabling execution resets future schedule times. A scheduled agent needs a default prompt or fixed workflow steps. A browser tool uses a fresh isolated session and public HTTPS only; it does not inherit personal browser sign-ins. The browser dependency is installed during one-time Horizon setup, not from the Agents panel. MCP servers are separate executables you must install and maintain.
+
+Fixed workflow steps are JSON entries with a `tool` and `args`, for example:
+
+```json
+[
+  { "tool": "file_list", "args": { "path": "C:\\Users\\you\\Documents" } },
+  { "tool": "file_read", "args": { "path": "C:\\Users\\you\\Documents\\notes.txt" } }
+]
+```
+
+File paths must be absolute and under an approved root. The tool must also be in the agent's allowed-tools list. The workflow can have at most 32 steps, and its length cannot exceed the agent's maximum-step setting. The editor's example disclosure lists argument shapes for other tools.
+
+For `command_run`, pass `{"commandId":"configured-command-id"}`; for `mcp_list_tools`, pass `{"serverId":"configured-server-id"}`; for `mcp_call_tool`, pass `{"serverId":"configured-server-id","toolName":"tool-name","arguments":{}}`. These are `args` objects, not executable configuration. Configure the executable, fixed arguments and absolute `cwd` in Agents settings. Command and MCP working directories must exist under an approved root, but this check does not sandbox their effects or make an executable safe.
+
+## Agent data and offline use
+
+Agent definitions, settings, permissions, prompts, tool results and run history are stored by the local server in its runtime data file (currently `.runtime/agent-data.json`). Treat it as sensitive and do not commit or share it. Browser data erasure does not remove server-side agent history.
+
+The server retains up to 100 runs / 16 MB and up to 150 events per run; tool results are limited to 12,000 characters. Older terminal runs are evicted as needed. Agent context is limited to 64,000 serialized JSON characters, not tokens; the model's own token context limit also applies. Long prompts or tool outputs may not fit.
+
+To erase server-side agent data, use **Agents → Settings → Erase agent data** and confirm. This cancels work, disables execution, resets permissions/settings, and permanently removes saved definitions and run history. It does not undo files already created or external effects. This is separate from the browser-only **Erase all data** control.
+
+Agent tool runs still use local model inference, but browser, command or MCP tools may use the network; enabling them is not an air-gap guarantee. Connection/privacy status distinguishes inference from network-capable tools and reports whether external tools are enabled or used. Persisted run history is not a network audit log and cannot record every request made by a command or MCP subprocess. For offline use, turn off link reading, cancel runs and use **Stop all** to disable agent execution. Configured commands and MCP servers can have effects beyond the approved file roots.
+
 ## A reply times out
 
 Large models can be slow on first use, as weights load into memory. If replies consistently exceed the limit, raise it in `config.json`:

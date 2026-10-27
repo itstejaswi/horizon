@@ -49,6 +49,7 @@ const state = {
   // Remembered so the air-gap badge can say that Horizon reached out, after
   // the amber has faded. A signal nobody saw is not a signal.
   lastReachedOut: null,
+  toolPrivacy: null,
   // Live dictation. The transcript arrives from the server as it is spoken;
   // `base` is whatever was already typed, so speech is added to it rather than
   // replacing the user's own text.
@@ -348,23 +349,26 @@ function refreshAirGap() {
   if (ui.airgapBadge.dataset.state === "reaching") return;
 
   const online = navigator.onLine;
+  const externalTools = state.toolPrivacy?.externalToolsEnabled || state.toolPrivacy?.externalToolsUsed;
   ui.airgapBadge.dataset.state = online ? "online" : "isolated";
 
   // The wording leads with what Horizon guarantees - that it runs on this
   // machine - rather than reporting the network as though it were a feature.
-  ui.airgapText.textContent = online ? "Connected local" : "Fully offline";
+  ui.airgapText.textContent = online ? (externalTools ? "External tools" : "Connected local") : "Network unavailable";
   // A badge that only lights up while something is happening is no use to
   // anyone who looked away. Once Horizon has reached out, the badge keeps
   // saying so, and pressing it shows exactly what was fetched and when.
   const lastReach = state.lastReachedOut;
   if (lastReach) {
     ui.airgapBadge.dataset.reached = "true";
-    ui.airgapBadge.title = `${lastReach.host ? `Last reached ${lastReach.host}` : "Last reached a page"} at ${lastReach.at}. Nothing else has left this machine. Press to see every request.`;
+    ui.airgapBadge.title = `${lastReach.host ? `Last reached ${lastReach.host}` : "Last reached a page"} at ${lastReach.at}. Inference stays local. Agent activity is recorded separately under Agents.`;
   } else {
     delete ui.airgapBadge.dataset.reached;
     ui.airgapBadge.title = online
-      ? "Connected to the local server on this machine only. Horizon has sent nothing outward. Press to see every request it has made."
-      : "No network is available, so nothing could leave this machine even if it tried. Press to see every request Horizon has made.";
+      ? (externalTools
+          ? "Inference is local, but enabled or previously used agent tools can access the network. Agents has their activity history; Traffic covers chat requests only."
+          : "Inference connects to the local server. Link reading and enabled external tools can use the network. Traffic covers chat requests, not a system-wide network audit.")
+      : "The browser reports no network connection. Local tools still work; this signal is not a system-wide network audit.";
   }
 
   const use = ui.airgapGlyph && ui.airgapGlyph.querySelector("use");
@@ -673,6 +677,9 @@ function addTools(turn, main, getText) {
   });
 
   tools.append(copy, save);
+  if (turn.classList.contains("assistant")) {
+    window.HorizonSpeech?.attach(tools, getText);
+  }
   main.append(tools);
 }
 
@@ -732,6 +739,7 @@ function renderChat() {
 /* ================================================================ chats === */
 
 function loadChat(id) {
+  if (state.busy) return setNote("Stop the current reply before changing conversations.", "warn");
   const chat = db.chat(id);
   if (!chat) return;
   state.chat = chat;
@@ -741,6 +749,8 @@ function loadChat(id) {
 }
 
 function startNewChat() {
+  if (state.busy) return setNote("Stop the current reply before starting another conversation.", "warn");
+  window.HorizonSpeech?.stop();
   state.chat = db.createChat();
   db.setPref("activeChatId", state.chat.id);
   renderChat();
@@ -1173,9 +1183,9 @@ function renderAbout() {
   };
 
   layer("Horizon", "good", [
-    "This application. It collects nothing, has no telemetry and no analytics, and sends nothing to its author or anyone else.",
-    "It talks to one address: the Foundry service on this machine. The Traffic panel shows every request it makes, so you can check that rather than take our word for it.",
-    "Your chats, prompts and memory stay in this browser unless you switch on the copy on disk in Settings."
+    "This independent application has no telemetry, analytics or author-operated cloud service.",
+    "Model inference uses Foundry Local on this machine. Optional link reading and agent tools can access the network; their destinations depend on what you enable.",
+    "Chats, prompts and memory stay in this browser unless you enable a disk copy. Agent definitions, permissions, schedules and run history are stored separately on disk."
   ]);
 
   layer("Foundry Local", null, [
@@ -1188,8 +1198,8 @@ function renderAbout() {
   });
 
   layer("The model", null, [
-    "A third party's work, running locally. It has no network access of its own and cannot open links or look anything up.",
-    "It answers only from what it was trained on plus what you type. Asked about a web page, it will guess from the address and can state that guess as fact.",
+    "A third party's work, running locally. It has no network access of its own; Horizon may execute permitted tools on its behalf in Agent mode.",
+    "It answers from training, your messages and supplied tool results. Without fetched page content it may guess from an address and state that guess as fact.",
     "Each model carries its own licence, shown in the model catalogue under Settings."
   ]);
 
@@ -1202,7 +1212,7 @@ function renderAbout() {
   const risks = el("ul", "help-list");
   for (const risk of [
     "The request leaves this computer. The site sees your address, as it would from any browser.",
-    "The page content stays here. It goes to your local model and nowhere else, and is never sent to us.",
+    "Fetched text is processed by your local model. Authorised browser actions, commands or MCP tools can send data elsewhere; Horizon does not send it to its author.",
     "Anything fetched is untrusted text. A page can contain instructions aimed at the model.",
     "Private and local addresses are always blocked, so a pasted link cannot reach devices on your network."
   ]) {
@@ -1245,7 +1255,7 @@ function renderAbout() {
   mineHead.append(brandMark("horizon"), el("h3", "about-credit-title", "About Horizon"));
   mine.append(mineHead);
   mine.append(el("p", "about-credit-body",
-    "Horizon is an independent, offline-first front end for local AI models. It gives you a window, a model picker and a place to keep your chats, so that running a model on your own machine does not require a terminal. It collects nothing, has no account, and sends nothing anywhere."));
+    "Horizon is an independent, local-first personal project for local AI models, optional tools and automations. It requires no Horizon account or paid inference API. External capabilities are off by default and have separate permissions. It is not a Microsoft product."));
 
   // The author's page, named as a link rather than as prose, because someone
   // reading the credits is the one person likely to want it. It opens in the
@@ -1513,7 +1523,7 @@ async function renderConnectionDrawer(body) {
     }
 
     note.textContent = data.allLoopback
-      ? "Every hop is on the loopback interface. Nothing here crosses a network."
+      ? "Every inference hop is on loopback. Agent tools and link reading are separate and may use the network."
       : "Warning: a hop in this chain is not on loopback.";
   } catch {
     note.textContent = "The local server is not responding, so the chain cannot be checked.";
@@ -1524,14 +1534,14 @@ async function renderConnectionDrawer(body) {
   const summary = el("summary");
   summary.append(
     icon("i-shield", "disclose-icon"),
-    el("span", null, online ? "Sends nothing outward" : "Fully offline"),
+    el("span", null, online ? "Local inference; optional external tools" : "Browser reports no network"),
     icon("i-chevron", "disclose-chevron")
   );
   const detail = el("div", "disclose-body");
   detail.append(
     el("p", "panel-note", online
-      ? "Every request Horizon makes goes to 127.0.0.1. You can watch that under Traffic."
-      : "No network is available, so nothing could leave this machine even if it tried."),
+      ? "Model inference uses loopback. Link reading, browser tools, configured commands and MCP servers may access the network. Traffic covers chat requests; Agents records tool calls, not every subprocess network request."
+      : "Local inference and local file workflows can operate offline. Browser connectivity is only a signal, not proof that every subprocess is disconnected."),
     el("p", "panel-note", "No telemetry, no analytics. Horizon does not control Foundry Local or the model itself.")
   );
   const link = el("a", "doc-link", "Foundry Local documentation");
@@ -1787,11 +1797,11 @@ function renderDesktopSetup(body) {
 
 /* --- reading linked pages ------------------------------------------------- */
 
-// The one capability that leaves this machine, so the panel is blunt about
+// Link reading can leave this machine, so the panel is blunt about
 // what it does and what it costs, and it stays off until asked for.
 function renderReaderSetup(body) {
   const section = settingsCard(body, "Reading links",
-    "The one capability that leaves this computer.");
+    "Fetches public web pages over the network. Agent tools have separate controls.");
 
   const row = el("label", "setup-row");
   const input = el("input");
@@ -2001,7 +2011,7 @@ function renderBackupSetup(body) {
           // The warning is the whole point of the panel being here.
           const warn = el("p", "field-hint is-warn");
           warn.append(icon("i-warn", "inline-glyph"), document.createTextNode(
-            " Everything is kept in this browser only. Clearing your browsing data, or opening Horizon in a different browser, will lose it."));
+            " Chats, prompts, memory and saved replies are kept in this browser only. Clearing browsing data will lose them. Agents have separate on-disk storage."));
           detail.append(warn);
           return;
         }
@@ -2226,6 +2236,11 @@ function renderBehaviourSettings(panel) {
   // Dictation belongs here for the same reason: it changes how you talk to the
   // model, and like reading links it reaches for something outside the page.
   renderDictationSetup(panel);
+  if (window.HorizonSpeech) {
+    const speech = settingsCard(panel, "Read replies aloud",
+      "Uses installed local Windows/browser voices, not Foundry Local. No cloud-voice fallback.");
+    window.HorizonSpeech.mountSettings(speech);
+  }
 }
 
 /* --- storage -------------------------------------------------------------- */
@@ -2233,18 +2248,20 @@ function renderBehaviourSettings(panel) {
 function renderStorageSettings(panel) {
   renderBackupSetup(panel);
 
-  const card = settingsCard(panel, "Erase everything",
+  const card = settingsCard(panel, "Erase browser data",
     `Chats, prompts, memory and saved replies currently use ${formatBytes(db.usageBytes())} in this browser.`);
 
   const erase = el("button", "btn-subtle is-danger");
   erase.type = "button";
-  erase.append(icon("i-trash", "btn-subtle-icon"), document.createTextNode("Erase all data"));
+  erase.append(icon("i-trash", "btn-subtle-icon"), document.createTextNode("Erase browser data"));
   erase.addEventListener("click", () => {
     if (!window.confirm("Erase every chat, prompt, memory and saved reply from this browser?")) return;
     db.eraseEverything();
+    window.HorizonSpeech?.reset();
     window.location.reload();
   });
   card.append(erase);
+  card.append(el("p", "field-hint", "Agent definitions, schedules, permissions and run history are stored separately. Use Erase agent data in Agents to remove them."));
 }
 
 /* --- horizon itself ------------------------------------------------------- */
@@ -2374,6 +2391,9 @@ async function refreshStatus() {
   try {
     const response = await fetch("/api/status");
     const data = await response.json();
+    state.toolPrivacy = data.privacy || null;
+    refreshAirGap();
+    $("chat-tools-settings").textContent = data.conversationTools ? "Tools available" : "Tools off";
     if (data.model) state.assistantLabel = data.model;
 
     // /api/status is the single source of truth for which model is active.
@@ -2383,6 +2403,9 @@ async function refreshStatus() {
       state.activeAlias = data.alias;
       if (!ui.pickerMenu.hidden) renderPickerMenu();
     }
+
+    window.addEventListener("horizon-agents-changed", () => refreshStatus());
+    $("chat-tools-settings").addEventListener("click", () => $("agents-btn").click());
 
     state.modelReady = Boolean(data.ready);
     if (data.alias) ui.prompt.placeholder = `Message ${data.alias}`;
@@ -3152,6 +3175,7 @@ window.addEventListener("beforeunload", event => {
 
 function setBusy(busy) {
   state.busy = busy;
+  ui.newChat.disabled = busy;
   ui.thread.setAttribute("aria-busy", String(busy));
   ui.sendIcon.textContent = "";
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
@@ -3321,6 +3345,7 @@ function scrollIfPinned() { if (pinnedToBottom) ui.thread.scrollTop = ui.thread.
 
 async function submit() {
   if (state.busy) return stopGenerating();
+  window.HorizonSpeech?.stop();
 
   const typed = ui.prompt.value.trim();
   // A file on its own is a reasonable message; the default question is what
@@ -3386,7 +3411,8 @@ async function submit() {
   // this hardware that wait is several seconds. A visible "thinking" state is
   // the difference between "it is working" and "did that even send?".
   const waiting = el("div", "waiting");
-  waiting.append(icon("i-orbit", "waiting-mark"), el("span", "waiting-text", "Thinking\u2026"));
+  const activity = window.HorizonActivity.create("thinking");
+  waiting.append(activity.element);
   reply.bubble.append(waiting);
 
   const caret = el("span", "caret");
@@ -3442,6 +3468,7 @@ async function submit() {
       // answer's first character instead would leave the orbit spinning
       // through the gap between the two.
       const closed = visible.includes("</think>");
+      activity.set(closed ? "answering" : "thinking");
       thinkingLabelNode.textContent = thinkingLabel(closed ? thoughtMs : null);
       // The orbit turns while the reasoning is still arriving, and stops when
       // it is done: motion means work in progress, nothing else.
@@ -3460,6 +3487,7 @@ async function submit() {
       answerBox = el("span");
       reply.bubble.insertBefore(answerBox, caret);
     }
+    if (answer) activity.set("answering");
     renderInto(answerBox, answer);
     scrollIfPinned();
   };
@@ -3501,7 +3529,7 @@ async function submit() {
     if (!waiting.isConnected) return clearInterval(waitingTimer);
     const seconds = Math.round((performance.now() - waitingSince) / 1000);
     if (seconds >= 3) {
-      waiting.querySelector(".waiting-text").textContent = `Thinking\u2026 ${seconds}s`;
+      waiting.dataset.elapsed = `${seconds}s`;
     }
   }, 1000);
 
@@ -3522,12 +3550,16 @@ async function submit() {
   const requestText = JSON.stringify(requestBody);
   logWire("out", `Request \u00B7 ${requestBody.messages.length} msg`, requestBody, requestText.length);
 
+  let toolControl = null;
   try {
+    toolControl = await window.HorizonChatTools.prepare(state.controller.signal);
+    requestBody.clientRunId = toolControl.id;
+    toolControl.pending = true;
     const response = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: toolControl.headers,
       signal: state.controller.signal,
-      body: requestText
+      body: JSON.stringify(requestBody)
     });
 
     const contentType = response.headers.get("Content-Type") || "";
@@ -3535,11 +3567,23 @@ async function submit() {
     if (!contentType.includes("text/event-stream")) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `Request failed with HTTP ${response.status}.`);
+      if (data.run) {
+        const result = await toolControl.follow(data.run, reply.main, state.controller.signal, (status, phase) => {
+          activity.set(phase || "failed", status);
+          setNote(status);
+        });
+        full = result.reply;
+        stopWaiting();
+        flush();
+        return finish({ ...data, ...result });
+      }
+      toolControl.finish();
       full = data.reply;
       paint();
       return finish(data);
     }
 
+    toolControl.finish();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -3561,7 +3605,7 @@ async function submit() {
           if (payload.delta) {
             if (firstTokenAt === null) {
               firstTokenAt = performance.now();
-              stopWaiting();
+              activity.set("answering");
               setNote(`First words in ${((firstTokenAt - started) / 1000).toFixed(1)}s...`);
             }
             full += payload.delta;
@@ -3607,6 +3651,12 @@ async function submit() {
   } finally {
     // Belt and braces: whatever happened, the waiting state must not survive.
     stopWaiting();
+    thinkingBox?.classList.remove("is-live");
+    if (toolControl?.pending) {
+      try { await toolControl.cancel(); }
+      catch (error) { setNote(`Could not confirm tool cancellation: ${error.message}`, "error"); }
+    }
+    toolControl?.finish();
     state.controller = null;
     setBusy(false);
     ui.prompt.focus();
@@ -3620,6 +3670,7 @@ async function submit() {
       role: "assistant",
       content: full,
       model: summary.model || state.assistantLabel,
+      ...(summary.agentRunId ? { agentRunId: summary.agentRunId } : {}),
       // Kept so a reloaded chat still says how long it thought, rather than
       // Kept so a reloaded chat still says how long it thought, rather than
       // falling back to the present tense for reasoning that finished days ago.
@@ -3630,6 +3681,7 @@ async function submit() {
     persistTurns();
     addTools(reply.turn, reply.main, () => answer || full);
     clampIfLong(reply.bubble, reply.main);
+    window.HorizonSpeech?.autoRead(answer || full);
 
     const seconds = (performance.now() - started) / 1000;
     const parts = [];
@@ -3655,6 +3707,9 @@ async function submit() {
     refreshStatus();
   }
 }
+
+window.addEventListener("horizon-tool-error", event => setNote(event.detail.message, "error"));
+window.addEventListener("horizon-speech-error", event => setNote(event.detail.message, "error"));
 
 /* ============================================================= composer === */
 
@@ -3892,6 +3947,7 @@ async function toggleDictation() {
       return;
     }
     // Whatever is already in the box is kept; speech is added to it.
+    window.HorizonSpeech?.stop();
     state.dictation.base = ui.prompt.value.trim();
     state.dictation.settled = false;
     // Shown immediately rather than after the request returns, so pressing the

@@ -16,6 +16,10 @@ const backup = require("./backup");
 const reader = require("./reader");
 const dictation = require("./dictation");
 const { foundryIcon } = require("./brand");
+const { AgentService } = require("./agents");
+const agentTools = require("./agent-tools");
+const { InferenceQueue } = require("./inference-queue");
+const { acquireAgentOwner } = require("./agent-owner");
 
 const CSP = "default-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'";
 
@@ -52,6 +56,94 @@ const state = {
   // there is only one microphone.
   dictation: { session: null, listeners: new Set(), recovering: false, recovered: false }
 };
+
+const inferenceQueue = new InferenceQueue();
+let agents = null;
+let agentOwner = null;
+function createAgentService() {
+  const complete = (body, signal) => inferenceQueue.run(async () => {
+    const status = await probeFoundry();
+    signal.throwIfAborted();
+    if (!status.ready || !state.baseUrl || !state.modelId) {
+      throw new Error(status.error || "Load a local model before running a model-driven agent.");
+    }
+    foundry.assertLoopback(state.baseUrl);
+    const response = await fetch(`${state.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, model: state.modelId, stream: false }),
+      signal,
+      redirect: "error"
+    });
+    const chunks = [];
+    let bytes = 0;
+    for await (const chunk of response.body) {
+      bytes += chunk.length;
+      if (bytes > 262144) throw new Error("Agent model response exceeded 256 KB.");
+      chunks.push(chunk);
+    }
+    const raw = Buffer.concat(chunks).toString("utf8");
+    if (!response.ok) throw new Error(`Foundry agent request failed (HTTP ${response.status}): ${raw.slice(0, 1000)}`);
+    return JSON.parse(raw);
+  }, signal);
+  return new AgentService({
+    directory: config.runtime.directory,
+    tools: agentTools,
+    complete
+  });
+}
+
+function agentRequestAllowed(req) {
+  try {
+    const host = new URL(`http://${req.headers.host}`);
+    if (!isLoopbackHost(host.hostname) || Number(host.port || 80) !== req.socket.localPort) return false;
+    if (req.headers["sec-fetch-site"] === "cross-site") return false;
+    if (req.headers.origin && req.headers.origin !== host.origin) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function handleAgents(req, res, urlPath) {
+  if (!agentRequestAllowed(req)) return sendJson(res, 403, { error: "Agent controls require a same-origin local connection." });
+  if (req.method === "GET" && urlPath === "/api/agents") return sendJson(res, 200, agents.snapshot());
+  if (req.method === "GET" && urlPath === "/api/agents/run") {
+    try {
+      const id = new URL(req.url, "http://localhost").searchParams.get("id");
+      return sendJson(res, 200, agents.getRun(id));
+    } catch (error) {
+      return sendJson(res, 404, { error: error.message });
+    }
+  }
+  if (req.method !== "POST") return sendJson(res, 405, { error: "Method not allowed." });
+  if (req.headers["x-horizon-agent-token"] !== agents.csrfToken) {
+    return sendJson(res, 403, { error: "Reload the Agents panel before changing agent controls." });
+  }
+  if (!(req.headers["content-type"] || "").startsWith("application/json")) {
+    return sendJson(res, 415, { error: "Agent controls accept application/json only." });
+  }
+  try {
+    const body = JSON.parse(await readBody(req, 131072));
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Request must be a JSON object.");
+    let result;
+    switch (urlPath) {
+      case "/api/agents/settings": result = agents.saveSettings(body); break;
+      case "/api/agents/save": result = agents.saveAgent(body); break;
+      case "/api/agents/delete": result = agents.deleteAgent(body.id); break;
+      case "/api/agents/run": result = agents.run(body.agentId, body.prompt); break;
+      case "/api/agents/cancel": result = agents.cancel(body.id); break;
+      case "/api/agents/cancel-chat": result = agents.cancelConversation(body.id); break;
+      case "/api/agents/approve": result = agents.approve(body.id, body.approvalId, body.approve); break;
+      case "/api/agents/stop": result = agents.stop(); break;
+      case "/api/agents/erase": result = await agents.erase(); break;
+      default: return sendJson(res, 404, { error: "Agent operation not found." });
+    }
+    return sendJson(res, 200, result);
+  } catch (error) {
+    return sendJson(res, error.statusCode || 400, { error: error.message });
+  }
+}
 
 function securityHeaders(extra = {}) {
   return {
@@ -562,6 +654,21 @@ async function handleChat(req, res) {
     return sendJson(res, 400, { error: "A user message is required." });
   }
 
+  if (agents.conversationEnabled()) {
+    if (!agentRequestAllowed(req) || req.headers["x-horizon-agent-token"] !== agents.csrfToken) {
+      return sendJson(res, 403, { error: "Reload Horizon to authorise conversation tools on this local page." });
+    }
+    if (!(req.headers["content-type"] || "").startsWith("application/json")) {
+      return sendJson(res, 415, { error: "Tool-enabled conversations accept application/json only." });
+    }
+    try {
+      const run = agents.chat(clean, input.clientRunId);
+      return sendJson(res, 200, { run, truncated, model: state.modelId || config.model.alias });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
   // A Foundry restart unloads models, so make sure one is actually resident
   // before sending. Loading here is far better than failing mid-stream.
   //
@@ -878,8 +985,20 @@ async function measureCache() {
 const server = http.createServer((req, res) => {
   const urlPath = (req.url || "/").split("?")[0];
 
+  if (urlPath === "/api/agents" || urlPath.startsWith("/api/agents/")) {
+    return handleAgents(req, res, urlPath)
+      .catch(error => sendJson(res, 500, { error: error.message }));
+  }
+
   if (req.method === "GET" || req.method === "HEAD") {
-    if (urlPath === "/api/status") return probeFoundry().then(value => sendJson(res, 200, value));
+    if (urlPath === "/api/chat-tools") {
+      if (!agentRequestAllowed(req)) return sendJson(res, 403, { error: "Conversation tools require a same-origin local connection." });
+      return sendJson(res, 200, { enabled: agents.conversationEnabled(), csrfToken: agents.csrfToken });
+    }
+    if (urlPath === "/api/status") return probeFoundry().then(value => sendJson(res, 200, {
+      ...value, conversationTools: agents.conversationEnabled(),
+      privacy: { ...agents.privacy(), readerEnabled: config.reader.enabled }
+    }));
     if (urlPath === "/api/diagnostics") {
       return diagnostics()
         .then(value => sendJson(res, 200, value))
@@ -1017,7 +1136,14 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === "POST") {
-    if (urlPath === "/api/chat") return handleChat(req, res);
+    if (urlPath === "/api/chat") {
+      const controller = new AbortController();
+      res.on("close", () => controller.abort(new Error("Chat connection closed.")));
+      return inferenceQueue.run(() => handleChat(req, res), controller.signal)
+        .catch(error => {
+          if (!res.destroyed && !res.writableEnded) sendJson(res, 503, { error: error.message });
+        });
+    }
 
     // Foundry daemon control. These shell out to the Foundry CLI with fixed
     // arguments; nothing from the request body reaches the command line.
@@ -1339,12 +1465,12 @@ async function resolveFoundry() {
 // means the user's first real message is not the one that waits for it.
 async function warmUp() {
   try {
-    await foundry.chatCompletion(state.baseUrl, {
+    await inferenceQueue.run(() => foundry.chatCompletion(state.baseUrl, {
       model: state.modelId,
       messages: [{ role: "user", content: "Hi" }],
       stream: false,
       max_tokens: 1
-    }, config.foundry.warmUpTimeoutMs);
+    }, config.foundry.warmUpTimeoutMs));
     state.warm = true;
   } catch {
     /* a failed warm-up is not fatal; the first message simply pays the cost */
@@ -1367,6 +1493,13 @@ async function main() {
     if (config.web.openBrowser) openInBrowser(running.url);
     process.exit(0);
   }
+
+  agentOwner = await acquireAgentOwner(config.runtime.directory);
+  agentOwner.on("error", error => {
+    console.error(`Agent ownership failed: ${error.message}`);
+    shutdown("Agent ownership lost");
+  });
+  agents = createAgentService();
 
   const resolved = await resolveFoundry();
   state.baseUrl = resolved.baseUrl;
@@ -1409,6 +1542,8 @@ async function main() {
   }
   console.log(`  State:   ${stateFile}`);
   console.log(`\n  Press Ctrl+C to stop.\n`);
+
+  agents.start();
 
   if (config.web.openBrowser) openInBrowser(url);
 
@@ -1481,10 +1616,16 @@ async function shutdown(signal) {
     state.dictation.session = null;
   }
   try {
+    if (agents) await agents.close();
+  } catch (error) {
+    console.error(`  Agent cleanup failed: ${error.message}`);
+  }
+  try {
     await releaseResources();
   } catch { /* never block exit on cleanup */ }
 
   runtime.clearState(config);
+  if (agentOwner) agentOwner.close();
   clearTimeout(guard);
   console.log("  Goodbye.\n");
   process.exit(0);

@@ -14,6 +14,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
+const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { test } = require("node:test");
 
@@ -70,8 +71,9 @@ function startStubFoundry() {
 
 function startApp(env) {
   return new Promise((resolve, reject) => {
+    const isolatedRuntime = env.HORIZON_RUNTIME_DIR ? null : fs.mkdtempSync(path.join(os.tmpdir(), "horizon-regression-"));
     const child = spawn(process.execPath, [path.join(ROOT, "src", "server.js")], {
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...env, HORIZON_RUNTIME_DIR: env.HORIZON_RUNTIME_DIR || isolatedRuntime },
       stdio: ["ignore", "pipe", "pipe"]
     });
 
@@ -86,7 +88,7 @@ function startApp(env) {
       if (!match || settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ child, url: match[1], port: Number(match[2]), output: () => out });
+      resolve({ child, url: match[1], port: Number(match[2]), output: () => out, runtimeDirectory: env.HORIZON_RUNTIME_DIR || isolatedRuntime });
     };
 
     // The banner arrives across several writes, so wait for the whole block
@@ -96,7 +98,11 @@ function startApp(env) {
       if (/Press Ctrl\+C to stop/.test(out)) finish();
     });
     child.stderr.on("data", chunk => { out += chunk; });
-    child.on("exit", code => { clearTimeout(timer); if (!settled) reject(new Error(`server exited (${code})\n${out}`)); });
+    child.on("exit", code => {
+      clearTimeout(timer);
+      if (isolatedRuntime) fs.rmSync(isolatedRuntime, { recursive: true, force: true });
+      if (!settled) reject(new Error(`server exited (${code})\n${out}`));
+    });
   });
 }
 
@@ -782,7 +788,7 @@ test("server: exiting releases the model before the process ends", async t => {
 
   // The state file is what a second launch reads to find the first. Leaving it
   // behind would make the next start defer to a server that no longer exists.
-  const stateFile = path.join(ROOT, ".runtime", "horizon.json");
+  const stateFile = path.resolve(ROOT, app.runtimeDirectory, "horizon.json");
   assert.equal(fs.existsSync(stateFile), false,
     "the runtime state file must be cleared on exit");
 });

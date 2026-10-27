@@ -1,0 +1,12 @@
+{
+  "name": "horizon-openclaw-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned isolated OpenClaw runtime for Horizon",
+  "dependencies": {
+    "openclaw": "2026.6.34"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
