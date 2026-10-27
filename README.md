@@ -282,6 +282,14 @@ The **?** button opens a page that separates three things people usually blur to
 - **Foundry Local** is Microsoft's software. It reaches the internet for models and its catalogue. We observed no other outbound traffic while it sat idle or answered a message, but we cannot prove the absence of telemetry and do not claim to.
 - **The model** has no network access of its own.
 
+## Building on Horizon
+
+Start with [Vision](Vision/README.md): the public contributor and agent handoff
+covering where Horizon started, its current architecture, the proposed OpenClaw
+plumbing, concrete implementation work and acceptance criteria. It distinguishes
+shipped capabilities from unwired integration scaffolding so another contributor
+can build on or around Horizon without reconstructing the project's history.
+
 ## Running the tests
 
 ```powershell
