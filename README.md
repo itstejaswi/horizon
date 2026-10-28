@@ -506,6 +506,29 @@ If the model thinks out loud before answering, that working is tucked into a **W
 
 Under the message box you get real numbers for each reply: how many tokens, how fast, and how long until the first words appeared.
 
+## Using Ollama instead of Foundry Local
+
+Horizon can run its models through Ollama, which accepts any model from its library or a GGUF from Hugging Face. Foundry Local stays the default.
+
+```powershell
+winget install Ollama.Ollama
+# config.local.json
+{ "provider": "ollama", "model": { "alias": "llama3.2:3b" } }
+```
+
+Or for one run: `.\scripts\Start-Horizon.ps1 -Provider ollama`, `--provider ollama`, or `HORIZON_PROVIDER=ollama`.
+
+| Setting | Env var | Default |
+|---|---|---|
+| `ollama.baseUrl` | `HORIZON_OLLAMA_URL` | `http://127.0.0.1:11434` (loopback only) |
+| `ollama.keepAlive` | `HORIZON_OLLAMA_KEEP_ALIVE` | `30m` |
+| `ollama.binary` | `HORIZON_OLLAMA_BINARY` | found on PATH |
+| `ollama.autoStart` | `HORIZON_OLLAMA_AUTOSTART` | `true` |
+
+In Settings, the runtime section has a box to pull any model by name. On a CPU-only machine with 8 GB of RAM, use 1B to 4B models. Small models can be unreliable at the tool-call JSON that agents need.
+
+Limits: dictation and the Setup, Optimize and Test scripts are Foundry-only. OpenClaw is unaffected, since it uses whichever runtime Horizon is using.
+
 ## Using a different model
 
 The code contains no model-specific logic. Download another Foundry model and point at it:
