@@ -1,0 +1,39 @@
+{
+  "id": "horizon-bridge",
+  "name": "Horizon bridge",
+  "description": "Exposes only the Horizon tools granted to the current run. Every call goes through Horizon's broker for permissions and approvals.",
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["baseUrl", "tools"],
+    "properties": {
+      "baseUrl": { "type": "string" },
+      "tools": { "type": "array", "maxItems": 32, "items": { "type": "object" } }
+    }
+  },
+  "activation": { "onStartup": true },
+  "contracts": {
+    "tools": [
+      "horizon_file_list", "horizon_file_read", "horizon_file_search", "horizon_file_write",
+      "horizon_command_run",
+      "horizon_browser_open", "horizon_browser_snapshot", "horizon_browser_click",
+      "horizon_browser_fill", "horizon_browser_close",
+      "horizon_mcp_list_tools", "horizon_mcp_call_tool"
+    ]
+  },
+  "toolMetadata": {
+    "horizon_file_list": { "optional": true },
+    "horizon_file_read": { "optional": true },
+    "horizon_file_search": { "optional": true },
+    "horizon_file_write": { "optional": true },
+    "horizon_command_run": { "optional": true },
+    "horizon_browser_open": { "optional": true },
+    "horizon_browser_snapshot": { "optional": true },
+    "horizon_browser_click": { "optional": true },
+    "horizon_browser_fill": { "optional": true },
+    "horizon_browser_close": { "optional": true },
+    "horizon_mcp_list_tools": { "optional": true },
+    "horizon_mcp_call_tool": { "optional": true }
+  }
+}

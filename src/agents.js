@@ -152,11 +152,12 @@ function bounded(value, max = 12000) {
 }
 
 class AgentService {
-  constructor({ directory, tools, complete, orchestrate, now = Date.now }) {
+  constructor({ directory, tools, complete, orchestrate, openclawStatus, now = Date.now }) {
     this.file = path.join(directory, "agent-data.json");
     this.tools = tools;
     this.complete = complete;
     this.orchestrate = orchestrate;
+    this.openclawStatus = openclawStatus;
     this.now = now;
     this.csrfToken = randomBytes(32).toString("hex");
     this.active = new Map();
@@ -235,7 +236,18 @@ class AgentService {
   }
 
   snapshot() {
-    return structuredClone({ ...this.data, csrfToken: this.csrfToken, schedulerError: this.schedulerError });
+    return structuredClone({
+      ...this.data, csrfToken: this.csrfToken, schedulerError: this.schedulerError,
+      ...(this.openclawStatus ? { openclaw: this.openclaw() } : {})
+    });
+  }
+
+  // Public runtime state only; never the install path.
+  openclaw() {
+    const status = this.openclawStatus();
+    return status.available
+      ? { available: true, version: status.version }
+      : { available: false, error: status.error };
   }
 
   privacy() {
@@ -255,6 +267,10 @@ class AgentService {
   saveSettings(input) {
     if (this.erasing) throw new Error("Agent data is being erased.");
     const settings = settingsValue(input);
+    if (settings.backend === "openclaw" && this.data.settings.backend !== "openclaw" && this.openclawStatus) {
+      const status = this.openclaw();
+      if (!status.available) throw new Error(`OpenClaw cannot be selected: ${status.error}`);
+    }
     this.cancelAll("Permissions or feature flags changed.");
     if (settings.enabled && !this.data.settings.enabled) {
       for (const agent of this.data.agents) {

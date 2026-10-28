@@ -21,11 +21,53 @@ Additional baseline coverage:
 | HTTP integration | Actual Horizon server against a simulated model endpoint, including chat tools and planned writes |
 | UI | Real Chromium with mocked backend responses: settings, plans, evidence, approval controls and reduced motion |
 | Local inference | Actual Phi-4 file-only multi-step acceptance |
-| OpenClaw | Broker/seam unit coverage only; no installed runtime, adapter or real integration |
+| OpenClaw | At the baseline: broker/seam unit coverage only. See the next section for later evidence |
 
 Not proven by this evidence: a real-model full-browser-to-command journey,
 all local models, every Windows architecture, long-running scheduling through
 actual sleep/wake, or general autonomous reasoning reliability.
+
+## OpenClaw evidence, 28 October 2026
+
+Tested with OpenClaw `2026.6.34` (`5c38f99`), Node `v24.16.0`, Windows x64.
+The regression suite passes **172 tests** (163 baseline + 9 adapter tests
+driving a fake OpenClaw executable over the real broker protocol).
+
+`npm run test:openclaw` passed against the **real installed runtime** with
+**scripted model decisions** through Horizon's engine, broker, bridge plugin
+and real file tools on synthetic files: an approved dependent read → write
+(3 model calls, 2 tool calls, one exact-call approval, content checked, no
+replay); a denied write (run failed, nothing written, no completion claim);
+cancellation during inference (run cancelled, no further model calls); and no
+per-run state or OpenClaw process left behind. Every model request offered
+exactly the granted `horizon_*` tools. Separately, the real Horizon server
+with a stub Foundry endpoint completed an OpenClaw chat from the UI; the
+endpoint received the selected model ID and only granted tools.
+
+**No real local model has been run through OpenClaw yet.** Foundry Local was
+not available in the environment used. That is the next acceptance step.
+
+| Gate | Status |
+|---|---|
+| Fresh install without OpenClaw | Met: `npm install` does not fetch it; selector disabled with reason; native tests unchanged |
+| Missing/incompatible runtime | Met: missing, version-mismatched and old-Node states reported; selection refused; runs fail explicitly |
+| Local model routing | Met with stub endpoint: model ID forced by server, no provider fallbacks, provider keys not inherited |
+| Chat and saved agents | Chat met (real runtime); saved-agent runs share the path but were not run against the real runtime |
+| Dependent file task | Met with scripted decisions; **not yet with a real model** |
+| Browser / fixed command / browser-to-script / MCP | **Not yet exercised** through OpenClaw |
+| Denied action | Met (real runtime) |
+| Concurrent file change | Relies on the unchanged native file tools; not separately exercised through OpenClaw |
+| Tool failure after side effect | Run fails and warns that earlier calls may have taken effect; no retry (fake runtime) |
+| Read/inference failure | Model failure fails the run (fake runtime) |
+| Step/model/time/output limits | Tool steps enforced by engine; model calls capped at `maxSteps + 1`; stdout capped at 1 MB; time limit via run signal |
+| Stop or permission change | Cancel met (real runtime); permission change uses the same abort path |
+| Restart | Unchanged engine behaviour: interrupted, not replayed |
+| Schedule | **Not yet exercised** through OpenClaw |
+| Empty/forged tool access | Met: exclusive plugin and tool allowlists, and the broker rejects any ungranted tool offered to the model |
+| Malformed runtime output | Met (fake runtime): non-JSON, empty payloads, error results and non-zero exits fail |
+| Evidence/UI | Backend, model, tool and result events recorded; OpenClaw runs have no outcome checks |
+| Cleanup | Met (real runtime): broker closed, process tree killed, state removed |
+| Compatibility | Recorded above; ARM64, macOS and Linux untested |
 
 ## Reproduce the baseline
 
@@ -88,6 +130,7 @@ reliably, and inspect truthful durable results, with no permission or privacy
 regressions in native mode.
 
 Record the release commit, exact tested versions, commands and remaining gaps.
-Do not advertise OpenClaw as bundled or connected while only the broker exists.
+Do not advertise OpenClaw as bundled, or as more than experimental, until the
+real-model gates above are met.
 Do not call an upstream feature supported until Horizon has wired and exercised
 it under Horizon's lifecycle and tool boundaries.

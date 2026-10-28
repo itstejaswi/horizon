@@ -18,6 +18,7 @@ const dictation = require("./dictation");
 const { foundryIcon } = require("./brand");
 const { AgentService } = require("./agents");
 const agentTools = require("./agent-tools");
+const { createOpenClawOrchestrator, runtimeStatus: openclawRuntimeStatus } = require("./openclaw-runtime");
 const { InferenceQueue } = require("./inference-queue");
 const { acquireAgentOwner } = require("./agent-owner");
 
@@ -89,7 +90,10 @@ function createAgentService() {
   return new AgentService({
     directory: config.runtime.directory,
     tools: agentTools,
-    complete
+    complete,
+    // Optional backend. Unavailable runtimes fail explicitly, never fall back.
+    orchestrate: createOpenClawOrchestrator({ tools: agentTools, complete }),
+    openclawStatus: openclawRuntimeStatus
   });
 }
 

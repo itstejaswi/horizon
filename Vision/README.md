@@ -25,9 +25,9 @@ The guiding split is:
 **Horizon presents and governs. Foundry Local thinks. An orchestration backend
 coordinates actions. Approved tools execute them.**
 
-Today the supported backend is Horizon's native engine. OpenClaw is a possible
-additional backend, not a prerequisite for native features and not yet a
-connected integration.
+Today the supported default backend is Horizon's native engine. OpenClaw is an
+optional, experimental backend, installed separately and never a prerequisite
+for native features.
 
 ## Read next
 
@@ -50,7 +50,17 @@ connected integration.
 - Local activity animations, dictation and optional verified-local browser
   speech synthesis. Read aloud is not a Foundry Local TTS integration.
 - An authenticated per-run broker and backend injection seam intended for
-  OpenClaw. Neither is connected to an actual OpenClaw process.
+  OpenClaw. At the baseline neither was connected to an actual OpenClaw process.
+
+## What shipped after the baseline
+
+- The OpenClaw backend is connected as an optional, experimental choice:
+  runtime adapter (`src/openclaw-runtime.js`), bridge plugin
+  (`tools/openclaw-bridge/`), server wiring, a settings selector that shows
+  unavailable runtimes, a separate `npm run setup:openclaw` step and an
+  explicit `npm run test:openclaw` acceptance test. The native engine remains
+  the default. See [ACCEPTANCE.md](ACCEPTANCE.md) for exactly what has and has
+  not been verified.
 
 ## Non-negotiable boundaries
 
@@ -79,7 +89,7 @@ actions, stop the work, and inspect evidence of what actually happened.
 
 Example: read a public page, save an authorised local report, run an explicitly
 configured report script, then verify its observable output. The same permission
-and lifecycle rules must apply whether the native backend or a future OpenClaw
+and lifecycle rules must apply whether the native backend or the OpenClaw
 backend chooses the actions.
 
 This is not a promise of unrestricted desktop control, arbitrary PowerShell,

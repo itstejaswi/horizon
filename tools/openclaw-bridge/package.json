@@ -1,0 +1,10 @@
+{
+  "name": "horizon-openclaw-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenClaw plugin that forwards Horizon tool calls to Horizon's per-run broker",
+  "type": "module",
+  "openclaw": {
+    "extensions": ["./index.js"]
+  }
+}
