@@ -5,7 +5,9 @@
 // and file tools on synthetic files. By default decisions come from a scripted
 // model, which proves the runtime contract but not model reliability. Set
 // HORIZON_AGENT_TEST_BASE_URL and HORIZON_AGENT_TEST_MODEL to an already-loaded
-// local model to run the same file task with real inference.
+// local model to run the same file task with real inference: any loopback
+// OpenAI-compatible endpoint, such as Foundry Local's or Ollama's
+// (http://127.0.0.1:11434/v1 with a model like qwen2.5:3b).
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -15,7 +17,10 @@ const { AgentService, DEFAULT_SETTINGS } = require("../src/agents");
 const tools = require("../src/agent-tools");
 const { createOpenClawOrchestrator, runtimeStatus } = require("../src/openclaw-runtime");
 const { isLoopbackHost } = require("../src/net");
-const { agentCompletion } = require("../src/foundry");
+const { createClient } = require("../src/openai-client");
+
+// Provider-neutral: the same loopback client Foundry and Ollama both use.
+const { agentCompletion } = createClient({ label: "Local model" });
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 

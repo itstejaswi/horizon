@@ -145,6 +145,8 @@ OpenClaw is optional and not installed by normal setup. **Agents → Settings �
 
 A run that fails with **OpenClaw run failed in Horizon** means a Horizon tool or model call failed or was denied during the run. Horizon marks the run failed even if OpenClaw's reply sounds successful; read the activity log, because earlier tool calls in that run may already have taken effect. **OpenClaw exited with code …** includes the end of OpenClaw's own error output. Load a local model before running; OpenClaw has no other model to use. Switch back to the native engine at any time.
 
+OpenClaw always uses native tool calls, so the selected runtime must support them for the selected model. If a run fails with **structured tool calling requires model-published opening and closing tool markers**, Foundry Local does not offer native tool calls for that model package (seen with `qwen3-vl-2b-instruct` on Foundry Local 0.12.1, even though its catalogue lists tool support). Choose a model and runtime with working tool calls, such as an Ollama model marked as tool-capable in the picker, or use the native engine with **Structured actions**, which does not use native tool calls.
+
 ### Read aloud is unavailable or silent
 
 Use the reply's **Read aloud** button or **Settings → Behaviour → Read aloud**. Only voices explicitly marked local by the browser are eligible. Install a Windows speech voice and use a browser that exposes it; a cloud-only voice is deliberately not a fallback. Automatic reading is opt-in. Hiding the tab, starting a new prompt/dictation, or closing the page stops playback.

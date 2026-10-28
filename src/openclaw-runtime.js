@@ -129,8 +129,10 @@ function buildMessage({ agent, prompt, settings, history }) {
   return lines.join("\n\n");
 }
 
-// OpenClaw speaks newer OpenAI parameters than Foundry Local accepts. The
-// server's callback sets the model itself, so the synthetic ID is dropped.
+// OpenClaw speaks newer OpenAI parameters than the local runtimes (Foundry
+// Local, Ollama) reliably accept, so map them to the long-standing ones. The
+// server's callback sets the selected provider's model itself, so the
+// synthetic ID is dropped.
 function localRequest(body) {
   const { model, stream_options, max_completion_tokens, ...rest } = body;
   if (max_completion_tokens !== undefined && rest.max_tokens === undefined) rest.max_tokens = max_completion_tokens;

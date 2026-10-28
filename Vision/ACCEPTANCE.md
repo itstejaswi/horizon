@@ -122,7 +122,7 @@ do not replace inference with scripted output and call that a real-model pass.
 |---|---|
 | Fresh install without OpenClaw | Native setup and all native functionality work; no optional runtime downloaded implicitly |
 | Missing/incompatible runtime | Clear unavailable/error state; no silent native or cloud fallback |
-| Local model routing | Actual calls reach the selected Foundry Local model through the shared queue; no external inference |
+| Local model routing | Actual calls reach the selected provider's model (Foundry Local or Ollama) through the shared queue; no external inference |
 | Chat and saved agents | Same explicit tool grants; conversation side effects still require approval |
 | Dependent file task | Real result references reach subsequent actions; reads/copies/overwrites produce expected files and checked hashes |
 | Browser task | Real model opens an authorised public HTTPS fixture, inspects text and performs a permitted interaction; isolated session only |

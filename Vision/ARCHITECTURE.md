@@ -40,8 +40,8 @@ flowchart TD
     Adapter --> OpenClaw["Isolated OpenClaw process + Horizon bridge plugin"]
     OpenClaw -->|Model decision request| Broker["Per-run authenticated loopback broker"]
     Broker --> Queue["Existing Horizon inference queue"]
-    Queue --> Foundry["Foundry Local"]
-    Foundry -->|Decision| OpenClaw
+    Queue --> Runtime["Selected local runtime: Foundry Local or Ollama"]
+    Runtime -->|Decision| OpenClaw
     OpenClaw -->|Tool request| Broker
     Broker --> Invoke["Existing Horizon invoke: grants, approvals and budget"]
     Invoke --> Tools["Existing Horizon tools"]
@@ -73,8 +73,11 @@ any model request that offers an ungranted tool or a changed schema, so a
 policy mistake fails closed rather than exposing a built-in.
 
 The adapter strips `model`, `stream_options` and maps `max_completion_tokens`
-to `max_tokens` before calling the server's inference callback, which pins
-the selected Foundry Local model. It parses `payloads[].text` from stdout and
+to `max_tokens` before calling the server's inference callback. That callback
+goes through the selected provider (`src/providers.js`: Foundry Local or
+Ollama) and pins its selected model, so OpenClaw has no provider wiring of its
+own. Native tool calls must work on that runtime and model: OpenClaw always
+sends the `tools` field. It parses `payloads[].text` from stdout and
 treats any broker-side tool/model failure, non-zero exit, malformed output,
 overflow or abort as a failed run. `finally` closes the broker, kills the
 process tree and removes the state folder.
