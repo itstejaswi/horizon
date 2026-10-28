@@ -144,6 +144,25 @@ test("malformed structured output fails explicitly without executing a tool", as
   assert.equal(calls.length, 0);
 });
 
+test("one prose reply gets a single correction before any tool runs", async t => {
+  const replies = ["I'll help you with that!", '{"tool":"file_read","args":{"path":"note"}}', '{"final":"done"}'];
+  const prompts = [];
+  const { service, calls, save } = fixture(t, {
+    complete: async body => {
+      prompts.push(structuredClone(body.messages));
+      return { choices: [{ message: { content: replies.shift() } }] };
+    }
+  });
+  service.run(save().id);
+  await until(() => terminal.has(service.data.runs[0].status));
+  const run = service.data.runs[0];
+  assert.equal(run.status, "completed", run.error);
+  assert.equal(run.result, "done");
+  assert.equal(calls.length, 1, "the prose reply itself executed nothing");
+  assert.ok(run.events.some(event => event.type === "retry"));
+  assert.match(prompts[1].at(-1).content, /not valid JSON/);
+});
+
 test("model cannot exceed tool budget or gain a tool through prompt content", async t => {
   let choice = "file_read";
   const { service, calls, save } = fixture(t, {
@@ -486,4 +505,14 @@ test("fixed workflows remain deterministic when OpenClaw is selected", async t =
   await until(() => terminal.has(service.getRun(run.id).status));
   assert.equal(service.getRun(run.id).status, "completed");
   assert.equal(calls.length, 1);
+});
+
+test("replies are attributed to OpenClaw only when it orchestrates conversation tools", t => {
+  const { service, settings } = fixture(t, { orchestrate: async () => "" });
+  assert.equal(service.orchestrator(), "Horizon");
+  settings.backend = "openclaw";
+  service.saveSettings(settings);
+  assert.equal(service.orchestrator(), "OpenClaw");
+  service.saveSettings({ ...settings, chat: { ...settings.chat, enabled: false } });
+  assert.equal(service.orchestrator(), "Horizon", "with conversation tools off, chat goes straight to the model");
 });

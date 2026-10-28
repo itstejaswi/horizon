@@ -18,6 +18,7 @@ const dictation = require("./dictation");
 const { foundryIcon } = require("./brand");
 const { AgentService } = require("./agents");
 const agentTools = require("./agent-tools");
+const { createOpenClawOrchestrator, runtimeStatus: openclawRuntimeStatus } = require("./openclaw-runtime");
 const { InferenceQueue } = require("./inference-queue");
 const { acquireAgentOwner } = require("./agent-owner");
 
@@ -68,28 +69,15 @@ function createAgentService() {
       throw new Error(status.error || "Load a local model before running a model-driven agent.");
     }
     foundry.assertLoopback(state.baseUrl);
-    const response = await fetch(`${state.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, model: state.modelId, stream: false }),
-      signal,
-      redirect: "error"
-    });
-    const chunks = [];
-    let bytes = 0;
-    for await (const chunk of response.body) {
-      bytes += chunk.length;
-      if (bytes > 262144) throw new Error("Agent model response exceeded 256 KB.");
-      chunks.push(chunk);
-    }
-    const raw = Buffer.concat(chunks).toString("utf8");
-    if (!response.ok) throw new Error(`Foundry agent request failed (HTTP ${response.status}): ${raw.slice(0, 1000)}`);
-    return JSON.parse(raw);
+    return foundry.agentCompletion(state.baseUrl, { ...body, model: state.modelId, stream: false }, signal);
   }, signal);
   return new AgentService({
     directory: config.runtime.directory,
     tools: agentTools,
-    complete
+    complete,
+    // Optional backend. Unavailable runtimes fail explicitly, never fall back.
+    orchestrate: createOpenClawOrchestrator({ tools: agentTools, complete }),
+    openclawStatus: openclawRuntimeStatus
   });
 }
 
@@ -817,23 +805,29 @@ async function listAgentModels() {
   };
 }
 
-// Switching model at run time avoids a restart. The alias is validated before
-// it can reach the Foundry command line.
-async function activateModel(alias) {
+// Switching model at run time avoids a restart. The name is validated before
+// it can reach the Foundry command line. The picker sends the exact downloaded
+// build it showed; that build is loaded by its own name so Foundry cannot
+// substitute a different one.
+async function activateModel(alias, variant) {
   if (!foundry.isSafeAlias(alias)) throw new Error(`That model name is not allowed: ${alias}`);
   if (!state.baseUrl) throw new Error("Foundry Local is not running. Start it from the Foundry panel first.");
 
   const available = await foundry.cachedModels();
-  if (!available.some(model => model.alias === alias)) {
+  const entry = (variant && available.find(model => model.id === variant)) ||
+    available.find(model => model.alias === alias || foundry.variantName(model.id) === alias);
+  if (!entry) {
     throw new Error(`"${alias}" is not downloaded on this machine.`);
   }
+  const name = foundry.variantName(entry.id);
+  if (!foundry.isSafeAlias(name)) throw new Error(`That model name is not allowed: ${name}`);
 
-  await foundry.loadModel(alias);
-  state.loadedByUs.add(alias);
-  const modelId = await foundry.resolveModelId(state.baseUrl, alias, config.foundry.statusTimeoutMs);
+  await foundry.loadModel(name);
+  state.loadedByUs.add(name);
+  const modelId = await foundry.resolveModelId(state.baseUrl, name, config.foundry.statusTimeoutMs);
 
   state.modelId = modelId;
-  config.model.alias = alias;
+  config.model.alias = name;
   state.statusCache = null;
   state.warm = false;
 
@@ -843,11 +837,11 @@ async function activateModel(alias) {
     port: state.port,
     endpoint: state.baseUrl,
     modelId,
-    modelAlias: alias
+    modelAlias: name
   });
 
   warmUp();
-  return { active: modelId, activeAlias: alias };
+  return { active: modelId, activeAlias: name };
 }
 
 /* ------------------------------------------------------- foundry control -- */
@@ -996,7 +990,7 @@ const server = http.createServer((req, res) => {
       return sendJson(res, 200, { enabled: agents.conversationEnabled(), csrfToken: agents.csrfToken });
     }
     if (urlPath === "/api/status") return probeFoundry().then(value => sendJson(res, 200, {
-      ...value, conversationTools: agents.conversationEnabled(),
+      ...value, conversationTools: agents.conversationEnabled(), orchestrator: agents.orchestrator(),
       privacy: { ...agents.privacy(), readerEnabled: config.reader.enabled }
     }));
     if (urlPath === "/api/diagnostics") {
@@ -1383,16 +1377,16 @@ const server = http.createServer((req, res) => {
     if (urlPath === "/api/models/activate" || urlPath === "/api/models/unload") {
       return readBody(req, 4096)
         .then(async raw => {
-          const alias = JSON.parse(raw || "{}").alias;
+          const { alias, variant } = JSON.parse(raw || "{}");
           if (urlPath.endsWith("unload")) {
-            if (alias === config.model.alias) {
+            if (alias === config.model.alias || (variant && foundry.variantName(variant) === config.model.alias)) {
               return sendJson(res, 400, { error: "That model is in use. Switch to another one first." });
             }
             await foundry.unloadModel(alias);
             state.loadedByUs.delete(alias);
             return sendJson(res, 200, await listAgentModels());
           }
-          await activateModel(alias);
+          await activateModel(alias, typeof variant === "string" ? variant : undefined);
           const refreshed = await listAgentModels();
           return sendJson(res, 200, refreshed);
         })

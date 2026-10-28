@@ -31,12 +31,12 @@ It does not branch or replan after execution begins.
 Fixed workflows bypass both the model loop and backend selection. Changing the
 backend must not convert those workflows into model-driven tasks.
 
-## Proposed OpenClaw path: not connected
+## OpenClaw path: connected, experimental
 
 ```mermaid
 flowchart TD
     User["Chat / saved agent / schedule"] --> Horizon["Horizon lifecycle and UI"]
-    Horizon --> Adapter["New OpenClaw runtime adapter"]
+    Horizon --> Adapter["src/openclaw-runtime.js adapter"]
     Adapter --> OpenClaw["Isolated OpenClaw process + Horizon bridge plugin"]
     OpenClaw -->|Model decision request| Broker["Per-run authenticated loopback broker"]
     Broker --> Queue["Existing Horizon inference queue"]
@@ -53,8 +53,31 @@ flowchart TD
     Adapter -.->|Close broker| Broker
 ```
 
-Arrows are conceptual. The broker and injection seam exist; the adapter,
-plugin and real-runtime lifecycle above still need implementation.
+Per run, the adapter creates a broker with only the run's granted tool
+definitions, writes a throwaway `openclaw.json` into a fresh temporary state
+folder and runs `openclaw agent --local --json --message-file …` with
+`process.execPath`, no shell and a minimal environment. The config:
+
+- declares one provider, `horizon`, pointing at the broker's `/v1` with
+  `models.mode: "replace"` and no fallbacks; its `apiKey` is the literal
+  `${HORIZON_BROKER_TOKEN}`, resolved by OpenClaw from the environment, so the
+  credential is never written to disk;
+- loads only `tools/openclaw-bridge` (`plugins.allow` is exclusive), passing it
+  the broker URL and granted definitions as plugin config;
+- sets `tools.allow` to exactly the granted `horizon_*` names and denies core
+  tool groups; skills are `[]`, memory, cron and commitments are off.
+
+The bridge registers each granted tool as an optional, sequential tool whose
+`execute` posts to the broker's `/tools/call`. The broker separately rejects
+any model request that offers an ungranted tool or a changed schema, so a
+policy mistake fails closed rather than exposing a built-in.
+
+The adapter strips `model`, `stream_options` and maps `max_completion_tokens`
+to `max_tokens` before calling the server's inference callback, which pins
+the selected Foundry Local model. It parses `payloads[].text` from stdout and
+treats any broker-side tool/model failure, non-zero exit, malformed output,
+overflow or abort as a failed run. `finally` closes the broker, kills the
+process tree and removes the state folder.
 
 ## Ownership
 
@@ -64,7 +87,7 @@ plugin and real-runtime lifecycle above still need implementation.
 | Native engine or OpenClaw | Coordinating local model decisions and authorised action requests | Access to tools not granted by Horizon |
 | Foundry Local | Local inference with the selected model | Every model follows tool/JSON protocols reliably |
 | Horizon tools | Real file, browser, fixed-command and MCP operations | Configured subprocesses are OS-sandboxed |
-| Future adapter/plugin | Protocol translation and isolated runtime lifecycle | An upstream feature is automatically exposed or safe |
+| OpenClaw adapter/bridge | Protocol translation and isolated runtime lifecycle | An upstream feature is automatically exposed or safe |
 
 ## Existing integration contracts
 
@@ -88,8 +111,12 @@ existing permission/approval path; the engine counts OpenClaw action requests
 against the run's tool budget. `onModel()` records local model activity.
 The run's signal carries cancellation and timeout.
 
-**The server currently supplies no `orchestrate` callback.** Selecting OpenClaw
-through hand-edited state fails explicitly; no UI backend selector is exposed.
+`src/server.js` supplies `createOpenClawOrchestrator(...)` as `orchestrate` and
+`runtimeStatus` as `openclawStatus`. The agents snapshot reports
+`openclaw: { available, version | error }` (never the install path); the
+settings selector disables OpenClaw while it is unavailable and
+`saveSettings` refuses to switch to it. A run whose runtime has since gone
+missing fails explicitly with the reason.
 
 `src/openclaw-broker.js` exports:
 
@@ -111,8 +138,7 @@ checks Host/origin metadata and exposes authenticated routes:
 | `POST /v1/chat/completions` | Forward to the supplied local inference callback |
 
 Read the implementation and tests for exact request shapes, alias handling,
-limits and cancellation. The broker is not itself an OpenClaw plugin or a
-production runtime adapter.
+limits and cancellation.
 
 ## Code map
 
@@ -125,13 +151,16 @@ production runtime adapter.
 | `src/agent-tools.js` | File, browser and fixed-command tools |
 | `src/agent-mcp.js` | Bounded stdio MCP transport and tool calls |
 | `src/agent-owner.js`, `src/inference-queue.js` | Single runtime owner and serial inference |
-| `src/openclaw-broker.js` | Inactive integration building block |
+| `src/openclaw-broker.js` | Per-run authenticated loopback broker for OpenClaw |
+| `src/openclaw-runtime.js` | Runtime status, per-run config, process lifecycle and result parsing |
+| `tools/openclaw-bridge/` | OpenClaw plugin forwarding granted tools to the broker |
+| `tools/test-openclaw-runtime.js` | Explicit real-runtime acceptance (`npm run test:openclaw`) |
 | `public/agents.js`, `public/chat-tools.js` | Settings, agents, activity, chat approvals and polling |
 | `public/activity.js`, `public/app.css` | Event-driven activity and plan/evidence rendering |
 | `public/speech.js`, `src/dictation.js` | Local speech playback and Foundry CLI dictation |
 | `tools/index.template.html` | UI source; build generates `public/index.html` |
 | `tools/setup-agent-runtime.js` | Provision supported browser dependencies, not OpenClaw |
-| `tools/openclaw-runtime/package.json` | Unused isolated OpenClaw pin manifest, not an installed runtime |
+| `tools/openclaw-runtime/` | Pinned OpenClaw manifest and lockfile; `npm run setup:openclaw` installs it here |
 
 ## Limits worth preserving
 

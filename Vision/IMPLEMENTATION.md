@@ -12,7 +12,41 @@
 5. Implement against a specific verified upstream version, then meet
    [ACCEPTANCE.md](ACCEPTANCE.md) before exposing the backend.
 
-## OpenClaw: remaining work
+## OpenClaw: status
+
+| Step | Status |
+|---|---|
+| 1. Runtime contract | Done for `openclaw@2026.6.34` (MIT, Node `>=22.19.0`). CLI flags, `openclaw.json` schema (`openclaw config validate`), plugin loading (`openclaw plugins inspect --runtime`), `--json` output shape and `--local` abort behaviour were checked against the installed release, on Windows x64 with Node 24.16. ARM64, macOS and Linux are untested. |
+| 2. Adapter and bridge | Done: `src/openclaw-runtime.js`, `tools/openclaw-bridge/`. |
+| 3. Server wiring | Done: `createAgentService()` injects `orchestrate` and `openclawStatus`. |
+| 4. Outcome verification | **Open.** OpenClaw runs have no outcome checks; the run shows tool execution events only. Native planning still applies only to the native engine. |
+| 5. Backend selector | Exposed as experimental, disabled with a reason while the runtime is missing or mismatched. Real-model acceptance is still outstanding: it did not pass on a 7.7 GB RAM laptop; see [ACCEPTANCE.md](ACCEPTANCE.md). |
+
+Things found while wiring it, worth knowing before changing it:
+
+- `tools.profile: "minimal"` filters plugin tools out even when `tools.allow`
+  names them, and OpenClaw then refuses to start the turn. Use the exclusive
+  `tools.allow` list without a profile.
+- OpenClaw sends `max_completion_tokens`, `stream_options` and streams by
+  default; the broker serves SSE and the adapter maps parameters for Foundry.
+- OpenClaw's system prompt is about 6,500 characters even after the adapter
+  stops workspace and persona files being injected (`contextInjection: "never"`,
+  `skipOptionalBootstrapFiles`); the rest is core and not configurable in this
+  release. On a 7.7 GB RAM laptop, 3–4B models took 5–30 minutes per task and
+  did not complete it correctly; see [ACCEPTANCE.md](ACCEPTANCE.md).
+- Do not enable `agents.defaults.experimental.localModelLean`: it replaces the
+  granted tools with a generic `tool_call` wrapper that the broker refuses.
+- Node's `fetch` gives up after five minutes without response headers. Agent
+  inference uses `foundry.agentCompletion` (plain loopback HTTP) instead, so
+  only the run's time limit and Stop apply.
+- Foundry resolves a bare alias such as `qwen2.5-3b` to the GPU build when one
+  exists and re-downloads it if removed. On integrated graphics that build can
+  crash on long prompts, and Horizon's alias setting cannot yet name an exact
+  CPU variant (variant IDs contain `:`).
+- PowerShell cannot browse the installed package because of Windows path-length
+  limits under deep `node_modules`; Node itself is unaffected.
+
+The original plan follows for reference.
 
 ### 1. Establish a version-correct runtime contract
 
@@ -31,8 +65,7 @@ on the optional runtime.
 
 ### 2. Implement an adapter and bridge plugin
 
-Suggested new files are `src/openclaw-runtime.js` and a dedicated bridge-plugin
-directory under `tools`. These names are proposals; they do not currently exist.
+Implemented as `src/openclaw-runtime.js` and `tools/openclaw-bridge/`.
 
 The adapter should:
 
@@ -57,8 +90,8 @@ does not make the subprocess an OS sandbox.
 
 ### 3. Wire the server without a second execution authority
 
-`createAgentService()` in `src/server.js` currently passes `tools` and `complete`,
-but no `orchestrate`. Inject the adapter there after it is implemented.
+`createAgentService()` in `src/server.js` now injects the adapter as
+`orchestrate`.
 
 Do not duplicate the engine's approval handling or invoke tool executables
 directly from the plugin. Every actual action must use the supplied `invoke`.

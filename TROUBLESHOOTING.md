@@ -137,7 +137,13 @@ Inspect the saved plan and evidence in the run card or inline tool activity. A s
 
 ### OpenClaw is unavailable
 
-OpenClaw is not bundled or connected. The permission-preserving broker and backend routing seam are retained, but no CLI/plugin adapter is wired. Runtime provisioning, adapter implementation and verified integration must happen in a permitted environment and follow device and organisation policies. Do not hand-enable the backend or bypass those policies. Use Horizon's native engine, the supported default.
+OpenClaw is optional and not installed by normal setup. **Agents → Settings → Execution backend** shows why it is unavailable:
+
+- **Not installed:** run `npm run setup:openclaw`, only where your device and organisation policies permit that software. Do not use another registry, archive or folder to get around a block.
+- **Does not match the tested pin:** something other than the pinned version is in `tools/openclaw-runtime/node_modules`. Run `npm run setup:openclaw` again to restore the pinned version.
+- **Needs Node 22.19.0 or newer:** update Node; the native engine works on older versions.
+
+A run that fails with **OpenClaw run failed in Horizon** means a Horizon tool or model call failed or was denied during the run. Horizon marks the run failed even if OpenClaw's reply sounds successful; read the activity log, because earlier tool calls in that run may already have taken effect. **OpenClaw exited with code …** includes the end of OpenClaw's own error output. Load a local model before running; OpenClaw has no other model to use. Switch back to the native engine at any time.
 
 ### Read aloud is unavailable or silent
 
@@ -155,7 +161,7 @@ The API uses a per-session token and checks the request origin. Use the Horizon 
 
 Runs that need a tool decision appear as **awaiting approval** with the exact tool arguments for review. Approve only when the action is understood; otherwise deny it. Use **Cancel run** to stop one run or **Stop all** to cancel every run and disable agent execution.
 
-Scheduled runs require both the server and computer to remain awake. A missed interval (including a run more than 30 seconds late after wake) or overlapping occurrence is marked **skipped** and is not replayed; an interrupted run is not resumed after restart. Re-enabling execution resets future schedule times. A scheduled agent needs a default prompt or fixed workflow steps. A browser tool uses a fresh isolated session and public HTTPS only; it does not inherit personal browser sign-ins. The browser dependency is installed during one-time Horizon setup, not from the Agents panel. MCP servers are separate executables you must install and maintain.
+Scheduled runs require both the server and computer to remain awake. A missed interval (including a run more than 30 seconds late after wake) or overlapping occurrence is marked **skipped** and is not replayed; an interrupted run is not resumed after restart. Re-enabling execution resets future schedule times. A scheduled agent needs a default prompt or fixed workflow steps. A browser tool uses a fresh isolated session and public HTTPS only; it does not inherit personal browser sign-ins. The browser dependency is installed during one-time Horizon setup, not from the Agents panel. If `npm run setup:browser` downloads Chromium but then stalls unpacking it (a file such as `chrome.dll` stays at 0 bytes, which security software can cause), stop it, delete the half-unpacked `chromium-*` folder under `%LOCALAPPDATA%\ms-playwright`, and rerun: with Microsoft Edge installed, setup skips the download and browser tools use Edge with a fresh temporary profile. MCP servers are separate executables you must install and maintain.
 
 Fixed workflow steps are JSON entries with a `tool` and `args`, for example:
 

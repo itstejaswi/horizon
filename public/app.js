@@ -26,9 +26,10 @@ const ui = {
 const state = {
   chat: null,
   defaults: null,
-  // Replaced by the real model name as soon as status loads. The reply is the
-  // model's work, so it is never labelled with the product's name.
+  // Replaced by the real model name as soon as status loads. Replies are
+  // labelled with the orchestrator; the model name is kept for hover and saves.
   assistantLabel: "Model",
+  orchestrator: "Horizon",
   busy: false,
   controller: null,
   drawer: null,
@@ -613,7 +614,7 @@ function thinkingLabel(ms) {
   return `Thought for ${minutes}m ${Math.round(seconds - minutes * 60)}s`;
 }
 
-function createTurn(role, label) {
+function createTurn(role, label, detail) {
   if (ui.empty.isConnected) ui.empty.remove();
   // The first turn of a conversation is what brings the title into view.
   ui.threadHead.hidden = false;
@@ -626,6 +627,7 @@ function createTurn(role, label) {
 
   const main = el("div", "turn-main");
   const meta = el("div", "turn-meta", label);
+  if (detail) meta.title = detail;
   const bubble = el("div", "bubble");
   main.append(meta, bubble);
 
@@ -701,8 +703,9 @@ function renderChat() {
   updateThreadMeta();
 
   for (const turn of turns) {
-    const label = turn.role === "user" ? "You" : (turn.model || state.assistantLabel);
-    const node = createTurn(turn.role, label);
+    // Chats saved before orchestrator labels were all answered through Horizon.
+    const label = turn.role === "user" ? "You" : (turn.orchestrator || "Horizon");
+    const node = createTurn(turn.role, label, turn.role === "user" ? null : (turn.model || state.assistantLabel));
     const { thinking, answer } = splitThinking(turn.content);
 
     if (thinking) {
@@ -2316,7 +2319,7 @@ function renderPickerMenu() {
   }
 
   for (const model of state.models) {
-    const active = model.alias === state.activeAlias;
+    const active = isActiveModel(model, state.activeAlias);
     const item = el("button", "picker-item");
     item.type = "button";
     item.setAttribute("role", "option");
@@ -2344,7 +2347,7 @@ function renderPickerMenu() {
           const response = await fetch("/api/models/activate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ alias: model.alias })
+            body: JSON.stringify({ alias: model.alias, variant: model.id })
           });
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || "Could not switch model.");
@@ -2395,6 +2398,7 @@ async function refreshStatus() {
     refreshAirGap();
     $("chat-tools-settings").textContent = data.conversationTools ? "Tools available" : "Tools off";
     if (data.model) state.assistantLabel = data.model;
+    if (data.orchestrator) state.orchestrator = data.orchestrator;
 
     // /api/status is the single source of truth for which model is active.
     // The picker used to keep its own copy, which drifted after a switch and
@@ -2695,7 +2699,7 @@ async function renderCatalogue(body) {
 
     for (const model of rows) {
       // "In use" means both selected and actually resident in memory.
-      const active = model.alias === wsState.activeAlias && model.loaded;
+      const active = isActiveModel(model, wsState.activeAlias) && model.loaded;
       const row = el("div", "mrow");
       row.dataset.active = String(active);
 
@@ -2782,6 +2786,13 @@ async function renderCatalogue(body) {
 
   paintRows();
   wsState.paintRows = paintRows;
+}
+
+// The configured model may be a short alias ("qwen2.5-3b") or an exact build
+// ("qwen2.5-3b-instruct-generic-cpu"); either way the matching row is active.
+function isActiveModel(model, activeAlias) {
+  return Boolean(activeAlias) &&
+    (model.alias === activeAlias || String(model.id || "").replace(/:\d+$/, "") === activeAlias);
 }
 
 async function runModelAction(alias, action, message) {
@@ -3405,7 +3416,7 @@ async function submit() {
   pinnedToBottom = true;
   scrollIfPinned();
 
-  const reply = createTurn("assistant", state.assistantLabel);
+  const reply = createTurn("assistant", state.orchestrator, state.assistantLabel);
 
   // Until the first token arrives there is nothing to show but a caret, and on
   // this hardware that wait is several seconds. A visible "thinking" state is
@@ -3634,7 +3645,7 @@ async function submit() {
       flush();
       caret.remove();
       if (full) {
-        state.chat.turns.push({ role: "assistant", content: full, model: state.assistantLabel });
+        state.chat.turns.push({ role: "assistant", content: full, model: state.assistantLabel, orchestrator: state.orchestrator });
         persistTurns();
       }
       setNote("Stopped.", "warn");
@@ -3670,6 +3681,7 @@ async function submit() {
       role: "assistant",
       content: full,
       model: summary.model || state.assistantLabel,
+      orchestrator: state.orchestrator,
       ...(summary.agentRunId ? { agentRunId: summary.agentRunId } : {}),
       // Kept so a reloaded chat still says how long it thought, rather than
       // Kept so a reloaded chat still says how long it thought, rather than

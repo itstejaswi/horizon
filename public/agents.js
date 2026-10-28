@@ -119,6 +119,7 @@
     }
     state.token = data.csrfToken || "";
     state.settings = data.settings;
+    state.openclaw = data.openclaw || null;
     state.agents = data.agents;
     state.runs = data.runs;
     const schedulerNotice = data.schedulerError ? `Agent scheduler error: ${data.schedulerError}` : "";
@@ -535,6 +536,24 @@
       "Experimental and model-dependent. Off by default: keeps the existing lightweight loop. Adds local inference to plan model-driven native-engine agents and conversations before execution, then checks configured outcomes. Small models may misformat valid tasks or ask unnecessary clarification; the engine stops and reports errors rather than relaxing checks. Fixed workflows remain the predictable option. A plan does not grant permission or replace approval; passing checks is not proof of the whole task's intent.");
     planning.querySelector("input").name = "planning";
     form.append(planning);
+    const backend = node("select", "agent-input");
+    backend.name = "backend";
+    const openclaw = state.openclaw;
+    for (const [value, label, disabled] of [
+      ["native", "Horizon native engine (default)", false],
+      ["openclaw", openclaw?.available ? `OpenClaw ${openclaw.version} (experimental)` : "OpenClaw (not installed)", !openclaw?.available]
+    ]) {
+      const option = node("option", "", label);
+      option.value = value;
+      // Keep an already-saved choice selectable so its state stays visible.
+      option.disabled = disabled && settings.backend !== value;
+      backend.append(option);
+    }
+    backend.value = settings.backend === "openclaw" ? "openclaw" : "native";
+    form.append(field("Execution backend", backend,
+      openclaw?.available
+        ? "OpenClaw coordinates model-driven runs using your loaded local model. Horizon still decides tool access, asks for approvals and can stop the run. Fixed workflows and planning stay native."
+        : `OpenClaw is unavailable${openclaw?.error ? `: ${openclaw.error}` : "."} The native engine is used.`));
     const flags = node("div", "agent-settings-flags");
     for (const [key, label] of [
       ["files", "File tools"], ["commands", "Command tools"], ["browser", "Browser tools"], ["mcp", "MCP tools"]
@@ -636,7 +655,7 @@
         return value;
       };
       const settings = {
-        backend: state.settings.backend || "native",
+        backend: form.querySelector('[name="backend"]').value === "openclaw" ? "openclaw" : "native",
         enabled: form.querySelector('[name="executionEnabled"]').checked,
         planning: form.querySelector('[name="planning"]').checked,
         flags: {

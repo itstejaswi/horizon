@@ -1,5 +1,6 @@
 "use strict";
 
+const http = require("http");
 const { execFile, spawn } = require("child_process");
 const { isLoopbackHost } = require("./net");
 
@@ -11,6 +12,14 @@ const SAFE_ALIAS = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 
 function isSafeAlias(alias) {
   return typeof alias === "string" && SAFE_ALIAS.test(alias);
+}
+
+// "qwen2.5-3b-instruct-generic-cpu:2" -> "qwen2.5-3b-instruct-generic-cpu".
+// Loading by this name pins one downloaded build; a bare alias lets Foundry
+// pick another build (often a GPU one) that may not be downloaded or may not
+// run on this machine.
+function variantName(id) {
+  return String(id || "").replace(/:\d+$/, "");
 }
 
 // Arguments are passed as a real argv array with no shell involved, so they
@@ -272,7 +281,9 @@ async function unloadModel(alias, timeoutMs = 120000) {
 // be used as a readiness signal. "foundry cache list" carries the real flag.
 async function isModelLoaded(alias, timeoutMs = 20000) {
   const models = await cachedModels(timeoutMs);
-  const entry = models.find(model => model.alias === alias);
+  // The configured name may be an alias or an exact build (see variantName).
+  const entry = models.find(model => model.alias === alias && model.loaded) ||
+    models.find(model => variantName(model.id) === alias);
   return Boolean(entry && entry.loaded);
 }
 
@@ -364,6 +375,49 @@ async function chatCompletion(baseUrl, body, timeoutMs) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   }, timeoutMs);
+}
+
+// Agent completions on a slow CPU can take longer than fetch's fixed
+// five-minute wait for response headers. This plain loopback request has no
+// timeout of its own: the run's signal carries Stop and the run time limit.
+function agentCompletion(baseUrl, body, signal, maxBytes = 262144) {
+  const url = new URL(`${baseUrl}/chat/completions`);
+  if (url.protocol !== "http:" || !isLoopbackHost(url.hostname)) {
+    return Promise.reject(new Error("Agent inference must use a loopback HTTP endpoint."));
+  }
+  const payload = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    const request = http.request(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
+    }, response => {
+      const chunks = [];
+      let bytes = 0;
+      response.on("data", chunk => {
+        bytes += chunk.length;
+        if (bytes > maxBytes) request.destroy(new Error("Agent model response exceeded 256 KB."));
+        else chunks.push(chunk);
+      });
+      response.on("end", () => {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return reject(new Error(`Foundry agent request failed (HTTP ${response.statusCode}): ${raw.slice(0, 1000)}`));
+        }
+        try {
+          resolve(JSON.parse(raw));
+        } catch {
+          reject(new Error("Foundry returned an unreadable agent response."));
+        }
+      });
+      response.on("error", reject);
+    });
+    const abort = () => request.destroy(signal.reason || new Error("Agent request cancelled."));
+    signal.addEventListener("abort", abort, { once: true });
+    request.on("close", () => signal.removeEventListener("abort", abort));
+    request.on("error", reject);
+    request.end(payload);
+  });
 }
 
 // Opens a streaming completion. The caller owns the returned controller so it
@@ -463,6 +517,8 @@ async function endpointAlive(baseUrl, timeoutMs = 4000) {
 
 module.exports = {
   ENDPOINT_PATTERN,
+  agentCompletion,
+  variantName,
   isSafeAlias,
   mergeLoadState,
   isInstalled,

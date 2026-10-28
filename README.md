@@ -172,7 +172,9 @@ A left rail holds everything, in the way you would expect from a modern chat app
 | **Traffic** | What was sent and received, at a recording level you choose. |
 | **Settings** | Instructions, creativity, storage usage, and a single button to erase everything. |
 
-The model picker sits in the top bar. It lists every model on your machine with its hardware target and size; choosing one switches live, with no restart, keeping your conversation.
+The model picker sits in the top bar. It lists every model on your machine with its hardware target and size; choosing one switches live, with no restart, keeping your conversation. It loads exactly the downloaded build you picked: Foundry is never asked for the bare alias, which can make it choose a different build (often a GPU one) that is not downloaded or cannot run on this machine. To pin a default the same way, set `model.alias` in `config.local.json` to the build's name, for example `qwen2.5-3b-instruct-generic-cpu`.
+
+Each reply is labelled with what orchestrated it: **Horizon**, or **OpenClaw** when that backend handles conversation tools. Hover the label to see the model that wrote it.
 
 Light, dark, and match-Windows themes are in the top right. Your choice is remembered.
 
@@ -184,7 +186,17 @@ The browser-only **Erase all data** control deletes browser-stored chats and rel
 
 ### Agents and tool access
 
-**OpenClaw integration status:** OpenClaw is not bundled or connected. The permission-preserving broker and backend routing seam are retained, but no CLI/plugin adapter is wired. Runtime provisioning, adapter implementation and verified integration must happen in a permitted environment and follow device and organisation policies. Do not hand-enable the backend; no OpenClaw selector is exposed. Horizon's native engine is the supported default.
+**OpenClaw backend (optional, experimental):** Horizon's native engine is the supported default. OpenClaw is not bundled or downloaded by normal setup. Where your device and organisation policies permit it, install the pinned runtime separately:
+
+```powershell
+npm run setup:openclaw
+```
+
+This installs exactly `openclaw@2026.6.34` (Node 22.19 or newer) into `tools/openclaw-runtime/`, without running package install scripts. **Agents → Settings → Execution backend** then offers OpenClaw; while the runtime is missing or a different version is installed, the option is disabled and the reason is shown. A run never falls back silently to native or to a cloud model.
+
+How a run works: Horizon starts a fresh OpenClaw process per model-driven run with a throwaway state folder, a minimal environment (no inherited provider keys or proxies) and only Horizon's bridge plugin. OpenClaw's only model is your loaded Foundry Local model, reached through Horizon's per-run loopback broker and the shared inference queue. Its only tools are the Horizon tools granted to that run; each call goes back through Horizon's grants, exact-call approvals, step budget and cancellation. Stop, a settings change, the time limit or shutdown terminate the process tree and delete its state. If any Horizon tool call or model call fails or is denied, the run is marked failed even if OpenClaw's reply sounds successful. Fixed workflows and native planning are unaffected by the backend choice; OpenClaw runs have no outcome checks, so review their results.
+
+`npm run test:openclaw` exercises the real runtime on synthetic files (approved write, denied write, cancellation, cleanup) with scripted model decisions; set `HORIZON_AGENT_TEST_BASE_URL` and `HORIZON_AGENT_TEST_MODEL` as for `test:local-agent` to use a real loaded model instead. Tested so far: OpenClaw 2026.6.34, Node 24.16, Windows x64, scripted decisions. OpenClaw's own instructions are long, so it needs a machine with plenty of memory and a capable tool-calling model: on a 7.7 GB RAM laptop, 3–4B models took 5–30 minutes per small task and did not complete it correctly (every wrong action was stopped at approval). On hardware like that, use the native engine. Browser, command, MCP and schedule journeys through OpenClaw are not yet verified; see [Vision/ACCEPTANCE.md](Vision/ACCEPTANCE.md).
 
 Live activity has distinct local animations for thinking, writing replies, reading/searching files, writing files, browser actions, commands and MCP calls. Tool states come from actual run events, not guesses about the prompt. Approval waits and finished/stopped/error states are still; reduced-motion preferences disable animations throughout these indicators. No GIF downloads, external animation services or additional dependencies are required.
 
@@ -196,7 +208,7 @@ The default conversation protocol uses structured JSON actions to accommodate sm
 
 #### Experimental native planning and outcome checks
 
-**Agents → Settings → Plan and verify native tasks** is off by default. Leaving it off preserves the existing lightweight model/tool loop. Enabling it adds local inference for model-driven saved agents and conversation runs using Horizon's native engine (with either structured or native tool-call protocol). Fixed workflows and the inactive OpenClaw backend are unchanged.
+**Agents → Settings → Plan and verify native tasks** is off by default. Leaving it off preserves the existing lightweight model/tool loop. Enabling it adds local inference for model-driven saved agents and conversation runs using Horizon's native engine (with either structured or native tool-call protocol). Fixed workflows and the optional OpenClaw backend are unchanged.
 
 **Experimental and model-dependent:** JSON planning is not reliable on every local model. Some cached small models may misformat otherwise valid tasks, supply invalid write arguments, mix check parameters into tool arguments, or ask unnecessary clarification. The engine stops and reports problems rather than relaxing validation or verification checks. Successful execution with one compatible model does not establish general model reliability. Fixed workflows remain the predictable option when you already know the required tool arguments.
 
@@ -216,7 +228,7 @@ Agent schedules are interval-based and persistent. They run only while the serve
 
 Agents continue to use local model inference; enabling network-capable tools does not send inference to a cloud model. However, browser, command and MCP tools may use the network, so a tool-enabled session is **not an air-gap guarantee**. The Connection/privacy status distinguishes local inference from network-capable tools and reports whether external tools are enabled or have been used. Agent history records runs and tool events/results (bounded to 100 runs / 16 MB, with up to 150 events per run); it is **not a network audit log** and does not record every network request made by a command or MCP subprocess. There are no cloud API keys or cloud token charges for Agents; local model usage is still limited by the model's context window.
 
-The browser dependency is provisioned during one-time Horizon setup. MCP servers are external executables: install and maintain each trusted MCP server yourself before configuring it.
+The browser dependency is provisioned during one-time Horizon setup. If Microsoft Edge is installed and Playwright's own Chromium is not, browser tools use Edge instead and nothing is downloaded; it still runs headless with a fresh temporary profile (never your Edge profile, sign-ins or history) behind the same public-HTTPS proxy. MCP servers are external executables: install and maintain each trusted MCP server yourself before configuring it.
 
 ## Everyday use
 

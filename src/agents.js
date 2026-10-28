@@ -152,11 +152,12 @@ function bounded(value, max = 12000) {
 }
 
 class AgentService {
-  constructor({ directory, tools, complete, orchestrate, now = Date.now }) {
+  constructor({ directory, tools, complete, orchestrate, openclawStatus, now = Date.now }) {
     this.file = path.join(directory, "agent-data.json");
     this.tools = tools;
     this.complete = complete;
     this.orchestrate = orchestrate;
+    this.openclawStatus = openclawStatus;
     this.now = now;
     this.csrfToken = randomBytes(32).toString("hex");
     this.active = new Map();
@@ -235,7 +236,18 @@ class AgentService {
   }
 
   snapshot() {
-    return structuredClone({ ...this.data, csrfToken: this.csrfToken, schedulerError: this.schedulerError });
+    return structuredClone({
+      ...this.data, csrfToken: this.csrfToken, schedulerError: this.schedulerError,
+      ...(this.openclawStatus ? { openclaw: this.openclaw() } : {})
+    });
+  }
+
+  // Public runtime state only; never the install path.
+  openclaw() {
+    const status = this.openclawStatus();
+    return status.available
+      ? { available: true, version: status.version }
+      : { available: false, error: status.error };
   }
 
   privacy() {
@@ -244,6 +256,12 @@ class AgentService {
         (this.data.settings.backend === "openclaw" || ["commands", "browser", "mcp"].some(flag => this.data.settings.flags[flag])),
       externalToolsUsed: Boolean(this.data.lastExternalActivity)
     };
+  }
+
+  // Who coordinates an ordinary chat reply: OpenClaw only when conversation
+  // tools are on and it is the selected backend; otherwise Horizon itself.
+  orchestrator() {
+    return this.conversationEnabled() && this.data.settings.backend === "openclaw" ? "OpenClaw" : "Horizon";
   }
 
   conversationEnabled() {
@@ -255,6 +273,10 @@ class AgentService {
   saveSettings(input) {
     if (this.erasing) throw new Error("Agent data is being erased.");
     const settings = settingsValue(input);
+    if (settings.backend === "openclaw" && this.data.settings.backend !== "openclaw" && this.openclawStatus) {
+      const status = this.openclaw();
+      if (!status.available) throw new Error(`OpenClaw cannot be selected: ${status.error}`);
+    }
     this.cancelAll("Permissions or feature flags changed.");
     if (settings.enabled && !this.data.settings.enabled) {
       for (const agent of this.data.agents) {
@@ -542,6 +564,7 @@ class AgentService {
       ...(history ? history.filter(message => message.role !== "system") : [{ role: "user", content: prompt }])
     ];
     let actions = 0;
+    let corrected = false;
     for (let turn = 0; turn <= agent.maxSteps; turn++) {
       signal.throwIfAborted();
       if (JSON.stringify(messages).length > 64000) throw new Error("Agent context exceeded 64000 characters. Reduce output or split the task.");
@@ -559,7 +582,16 @@ class AgentService {
         try {
           action = JSON.parse(text(message.content, "Model response", 24000));
         } catch (error) {
-          throw new Error(`Model did not follow the structured action protocol: ${error.message}. Try another model or native mode.`);
+          if (corrected) throw new Error(`Model did not follow the structured action protocol: ${error.message}. Try another model or native mode.`);
+          // Small models sometimes open with prose. As in planned mode, allow
+          // exactly one correction; nothing has executed from this reply.
+          corrected = true;
+          this.event(run, "retry", `Reply was not a JSON action; requesting one correction before acting: ${error.message}`);
+          messages.push({ role: "assistant", content: typeof message.content === "string" ? message.content : "" }, {
+            role: "user",
+            content: 'Your reply was not valid JSON. Reply with ONLY one JSON object: {"tool":"tool_name","args":{...}} to act, or {"final":"your answer"} to finish. No prose or markdown.'
+          });
+          continue;
         }
         object(action, "Model action");
         if (typeof action.final === "string" && Object.keys(action).length === 1) return text(action.final, "Final answer", 24000, true);

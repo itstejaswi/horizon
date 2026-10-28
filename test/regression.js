@@ -231,6 +231,16 @@ test("foundry: rejects unsafe model aliases", () => {
   }
 });
 
+// A bare alias lets Foundry pick a build that is not downloaded, or a GPU
+// build that cannot run here; the picker loads the exact downloaded build.
+test("foundry: exact build names drop only the version suffix and stay safe", () => {
+  const foundry = require(path.join(ROOT, "src", "foundry.js"));
+  assert.equal(foundry.variantName("qwen2.5-3b-instruct-generic-cpu:2"), "qwen2.5-3b-instruct-generic-cpu");
+  assert.equal(foundry.variantName("Phi-4-mini-instruct-generic-cpu:5"), "Phi-4-mini-instruct-generic-cpu");
+  assert.equal(foundry.variantName("phi-4"), "phi-4");
+  assert.equal(foundry.isSafeAlias(foundry.variantName("qwen3-vl-2b-instruct-generic-cpu:2")), true);
+});
+
 // "foundry model list" reports the catalogue but has no "loaded" field at all,
 // so trusting it alone made every model look unloaded even while one was live.
 test("foundry: catalogue takes load state from the cache listing", () => {

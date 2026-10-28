@@ -246,11 +246,11 @@
        read results. Only explicitly transient read-only failures may retry once, within
        the run's call budget. Existing permissions and approvals are unchanged. This is
        not adaptive replanning or general semantic proof that a request was fulfilled.</p>
-    <p class="lede">OpenClaw is not bundled or connected. The permission-preserving broker
-       and backend routing seam are retained, but no CLI/plugin adapter is wired.
-       Runtime provisioning, adapter implementation and verified integration must happen
-       in a permitted environment and follow device and organisation policies.
-       Horizon's native engine is the supported default.</p>
+    <p class="lede">OpenClaw is an optional, experimental backend and is not bundled.
+       Where your policies permit it, a separate setup step installs a pinned runtime;
+       each run then gets an isolated OpenClaw process whose only model is your local
+       one and whose only tools are Horizon's, still behind Horizon's permissions,
+       approvals and Stop. Horizon's native engine is the supported default.</p>
     <p class="lede">Read aloud uses local voices exposed by Windows and your browser,
        not a Foundry Local TTS endpoint. Foundry Local 0.12.1 provides transcription;
        cloud Microsoft Foundry Speech is a separate service and is not used.</p>
