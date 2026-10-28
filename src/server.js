@@ -9,7 +9,10 @@ const { exec } = require("child_process");
 
 const { loadConfig, saveLocalSettings } = require("./config");
 const { isLoopbackHost, listenWithFallback } = require("./net");
+// The Foundry CLI itself. Only dictation talks to it directly, because speech
+// recognition is a Foundry feature; every model runtime goes through provider.
 const foundry = require("./foundry");
+const { createProvider } = require("./providers");
 const runtime = require("./runtime");
 const desktop = require("./desktop");
 const backup = require("./backup");
@@ -39,6 +42,7 @@ const MIME_TYPES = {
 };
 
 const config = loadConfig();
+const provider = createProvider(config);
 const state = {
   baseUrl: null,
   modelId: null,
@@ -68,8 +72,8 @@ function createAgentService() {
     if (!status.ready || !state.baseUrl || !state.modelId) {
       throw new Error(status.error || "Load a local model before running a model-driven agent.");
     }
-    foundry.assertLoopback(state.baseUrl);
-    return foundry.agentCompletion(state.baseUrl, { ...body, model: state.modelId, stream: false }, signal);
+    provider.assertLoopback(state.baseUrl);
+    return provider.agentCompletion(state.baseUrl, { ...body, model: state.modelId, stream: false }, signal);
   }, signal);
   return new AgentService({
     directory: config.runtime.directory,
@@ -198,7 +202,7 @@ function readBody(req, limitBytes) {
 // Foundry picks a new port each time it restarts. If it becomes unreachable
 // mid-session, re-discover the endpoint rather than making the user restart.
 async function rediscoverFoundry() {
-  const endpoint = await foundry.discoverEndpoint(10000);
+  const endpoint = await provider.discoverEndpoint(10000);
   if (!endpoint) return false;
 
   const candidate = (endpoint.endsWith(config.foundry.apiPrefix) ? endpoint : endpoint + config.foundry.apiPrefix)
@@ -206,8 +210,8 @@ async function rediscoverFoundry() {
   if (candidate === state.baseUrl) return false;
 
   try {
-    foundry.assertLoopback(candidate);
-    const modelId = await foundry.resolveModelId(candidate, config.model.alias, config.foundry.statusTimeoutMs);
+    provider.assertLoopback(candidate);
+    const modelId = await provider.resolveModelId(candidate, config.model.alias, config.foundry.statusTimeoutMs);
     state.baseUrl = candidate;
     state.modelId = modelId;
     state.warm = false;
@@ -222,11 +226,27 @@ async function rediscoverFoundry() {
       modelAlias: config.model.alias
     });
 
-    console.log(`  Foundry moved to ${candidate}. Reconnected automatically.`);
+    console.log(`  ${provider.label} moved to ${candidate}. Reconnected automatically.`);
     return true;
   } catch {
     return false;
   }
+}
+
+// Whether the chosen model can answer now. A runtime that loads models on first
+// use is ready once the model is installed; one that does not needs it resident.
+function modelReady(alias) {
+  return provider.loadsOnDemand ? provider.isModelAvailable(alias) : provider.isModelLoaded(alias);
+}
+
+function providerInfo() {
+  return {
+    name: provider.name,
+    label: provider.label,
+    docs: provider.docsUrl,
+    loadsOnDemand: Boolean(provider.loadsOnDemand),
+    supportsDictation: Boolean(provider.supportsDictation)
+  };
 }
 
 async function probeFoundry() {
@@ -244,7 +264,7 @@ async function probeFoundry() {
         alias: config.model.alias,
         endpoint: null,
         needsFoundry: true,
-        error: "Foundry Local is not running. Open the Foundry panel to start it."
+        error: `${provider.label} is not running. Open the ${provider.name === "foundry" ? "Foundry" : provider.label} panel to start it.`
       };
       state.statusCache = result;
       state.statusCacheAt = now;
@@ -258,15 +278,15 @@ async function probeFoundry() {
     // from the CLI's loaded flag when this is an instance we manage. For an
     // endpoint supplied explicitly, presence in /v1/models is all we have.
     const loaded = state.managed
-      ? await foundry.isModelLoaded(config.model.alias)
-      : (await foundry.listModels(state.baseUrl, config.foundry.statusTimeoutMs)).some(m => m.id === state.modelId);
+      ? await modelReady(config.model.alias)
+      : (await provider.listModels(state.baseUrl, config.foundry.statusTimeoutMs)).some(m => m.id === state.modelId);
 
     // The CLI talks to the daemon directly, so it answers correctly even when
     // the daemon has restarted on a new port and our endpoint has gone stale.
     // That combination reported ready:true against a dead address, which is
     // worse than reporting a failure. So when the CLI says a model is loaded,
     // the endpoint we hold is checked rather than assumed.
-    if (loaded && state.managed && !(await foundry.endpointAlive(state.baseUrl, config.foundry.statusTimeoutMs))) {
+    if (loaded && state.managed && !(await provider.endpointAlive(state.baseUrl, config.foundry.statusTimeoutMs))) {
       await rediscoverFoundry();
     }
 
@@ -278,15 +298,17 @@ async function probeFoundry() {
           alias: config.model.alias,
           endpoint: state.baseUrl,
           needsLoad: true,
-          error: `"${config.model.alias}" is downloaded but not in memory. Choose it in the model picker to load it.`
+          error: provider.loadsOnDemand
+            ? `"${config.model.alias}" is not installed in ${provider.label}. Download it from the model picker.`
+            : `"${config.model.alias}" is downloaded but not in memory. Choose it in the model picker to load it.`
         };
   } catch (error) {
     // The service may simply have restarted on a different port.
     if (await rediscoverFoundry()) {
       try {
         const loaded = state.managed
-          ? await foundry.isModelLoaded(config.model.alias)
-          : (await foundry.listModels(state.baseUrl, config.foundry.statusTimeoutMs)).some(m => m.id === state.modelId);
+          ? await modelReady(config.model.alias)
+          : (await provider.listModels(state.baseUrl, config.foundry.statusTimeoutMs)).some(m => m.id === state.modelId);
         if (loaded) {
           result = { ready: true, model: state.modelId, alias: config.model.alias, endpoint: state.baseUrl, reconnected: true };
           state.statusCache = result;
@@ -300,7 +322,7 @@ async function probeFoundry() {
       model: state.modelId,
       alias: config.model.alias,
       endpoint: state.baseUrl,
-      error: `${error.message} Try running: foundry server restart`
+      error: `${error.message} Try running: ${provider.restartHint}`
     };
   }
 
@@ -353,7 +375,9 @@ function dictationBroadcast(payload) {
 // this before offering a button, so the answer has to be honest rather than
 // optimistic.
 function dictationStatus() {
-  const capability = dictation.capability();
+  const capability = provider.supportsDictation
+    ? dictation.capability()
+    : { available: false, reason: `Dictation needs Foundry Local. It is not available with ${provider.label}.` };
   const session = state.dictation.session;
   return {
     enabled: Boolean(config.dictation.enabled),
@@ -394,6 +418,7 @@ async function dictationSessionAsync() {
 }
 
 function dictationSession() {
+  if (!provider.supportsDictation) return null;
   if (state.dictation.session) return state.dictation.session;
 
   const session = new dictation.DictationSession({
@@ -473,6 +498,7 @@ function dictationSession() {
 // alongside any other download. Nothing is loaded into memory here: that
 // happens on the first recording, and is released when idle.
 function dictationEnsureModel() {
+  if (!provider.supportsDictation) return;
   const alias = config.dictation.alias;
   if (state.downloads.has(alias)) return;
 
@@ -562,7 +588,7 @@ async function streamChat(req, res, body, truncated) {
   let response;
   try {
     resetIdleTimer();
-    response = await foundry.chatCompletionStream(state.baseUrl, body, controller.signal);
+    response = await provider.chatCompletionStream(state.baseUrl, body, controller.signal);
   } catch (error) {
     clearTimeout(idleTimer);
     state.statusCache = null;
@@ -572,7 +598,7 @@ async function streamChat(req, res, body, truncated) {
         // Said as a limit rather than a fault, because that is what it is. A
         // long page and a large model can genuinely take longer than this, and
         // the remedy is in the user's hands.
-        ? `The model did not finish within ${Math.round(config.foundry.requestTimeoutMs / 1000)} seconds. A long page or a large model can need more; try a shorter question, or raise foundry.requestTimeoutMs in config.local.json.`
+        ? `The model did not finish within ${Math.round(config.foundry.requestTimeoutMs / 1000)} seconds. A long page or a large model can need more; try a shorter question, or raise provider.requestTimeoutMs in config.local.json.`
         : error.message
     });
   }
@@ -584,7 +610,7 @@ async function streamChat(req, res, body, truncated) {
   let finishReason = null;
 
   try {
-    for await (const event of foundry.parseServerSentEvents(response)) {
+    for await (const event of provider.parseServerSentEvents(response)) {
       resetIdleTimer();
       if (event.model) model = event.model;
       if (event.usage) usage = event.usage;
@@ -598,7 +624,7 @@ async function streamChat(req, res, body, truncated) {
     clearTimeout(idleTimer);
     if (closed) return;
     if (!produced) {
-      sendSse(res, { error: "Foundry produced an empty reply." });
+      sendSse(res, { error: `${provider.label} produced an empty reply.` });
       return res.end();
     }
     sendSse(res, { done: true, usage, model, temperature: body.temperature, truncated, finishReason });
@@ -668,14 +694,14 @@ async function handleChat(req, res) {
     await attachFoundry({ load: true });
     if (!state.baseUrl || !state.modelId) {
       return sendJson(res, 503, {
-        error: "No model is ready yet. Open the Foundry panel to start the service and load a model."
+        error: `No model is ready yet. Open the ${provider.label} panel to start the service and load a model.`
       });
     }
   } else if (state.managed) {
-    const loaded = await foundry.isModelLoaded(config.model.alias).catch(() => null);
+    const loaded = await provider.isModelLoaded(config.model.alias).catch(() => null);
     if (loaded === false) {
       try {
-        const didLoad = await foundry.ensureLoaded(config.model.alias);
+        const didLoad = await provider.ensureLoaded(config.model.alias);
         if (didLoad) state.loadedByUs.add(config.model.alias);
         state.statusCache = null;
       } catch (error) {
@@ -693,18 +719,18 @@ async function handleChat(req, res) {
   if (wantsStream) return streamChat(req, res, body, truncated);
 
   try {
-    const result = await foundry.chatCompletion(state.baseUrl, { ...body, stream: false }, config.foundry.requestTimeoutMs);
+    const result = await provider.chatCompletion(state.baseUrl, { ...body, stream: false }, config.foundry.requestTimeoutMs);
 
     if (!result.ok) {
       state.statusCache = null;
       return sendJson(res, result.status, {
-        error: result.payload?.error?.message || `Foundry returned HTTP ${result.status}.`
+        error: result.payload?.error?.message || `${provider.label} returned HTTP ${result.status}.`
       });
     }
 
     const reply = result.payload?.choices?.[0]?.message?.content;
     if (typeof reply !== "string") {
-      return sendJson(res, 502, { error: "Foundry returned no assistant message." });
+      return sendJson(res, 502, { error: `${provider.label} returned no assistant message.` });
     }
 
     return sendJson(res, 200, {
@@ -738,7 +764,7 @@ async function diagnostics() {
 
   const foundryHop = {
     id: "foundry",
-    label: "Foundry service",
+    label: `${provider.label} service`,
     state: "unknown",
     detail: state.baseUrl || "not running",
     note: "Hosts the model.",
@@ -763,7 +789,7 @@ async function diagnostics() {
 
   const started = Date.now();
   try {
-    const models = await foundry.listModels(state.baseUrl, config.foundry.statusTimeoutMs);
+    const models = await provider.listModels(state.baseUrl, config.foundry.statusTimeoutMs);
     foundryHop.state = "ok";
     foundryHop.latencyMs = Date.now() - started;
 
@@ -773,7 +799,7 @@ async function diagnostics() {
       modelHop.note = state.warm ? "Loaded and warm." : "Loaded.";
     } else {
       modelHop.state = "error";
-      modelHop.note = `Not loaded. Run: foundry model load ${config.model.alias}`;
+      modelHop.note = `Not loaded. Run: ${provider.loadHint(config.model.alias)}`;
     }
   } catch (error) {
     foundryHop.state = "error";
@@ -797,7 +823,7 @@ async function diagnostics() {
 /* ---------------------------------------------------------- agent control -- */
 
 async function listAgentModels() {
-  const models = await foundry.cachedModels();
+  const models = await provider.cachedModels();
   return {
     active: state.modelId,
     activeAlias: config.model.alias,
@@ -810,21 +836,21 @@ async function listAgentModels() {
 // build it showed; that build is loaded by its own name so Foundry cannot
 // substitute a different one.
 async function activateModel(alias, variant) {
-  if (!foundry.isSafeAlias(alias)) throw new Error(`That model name is not allowed: ${alias}`);
-  if (!state.baseUrl) throw new Error("Foundry Local is not running. Start it from the Foundry panel first.");
+  if (!provider.isSafeAlias(alias)) throw new Error(`That model name is not allowed: ${alias}`);
+  if (!state.baseUrl) throw new Error(`${provider.label} is not running. Start it from the ${provider.label} panel first.`);
 
-  const available = await foundry.cachedModels();
+  const available = await provider.cachedModels();
   const entry = (variant && available.find(model => model.id === variant)) ||
-    available.find(model => model.alias === alias || foundry.variantName(model.id) === alias);
+    available.find(model => model.alias === alias || provider.variantName(model.id) === alias);
   if (!entry) {
     throw new Error(`"${alias}" is not downloaded on this machine.`);
   }
-  const name = foundry.variantName(entry.id);
-  if (!foundry.isSafeAlias(name)) throw new Error(`That model name is not allowed: ${name}`);
+  const name = provider.variantName(entry.id);
+  if (!provider.isSafeAlias(name)) throw new Error(`That model name is not allowed: ${name}`);
 
-  await foundry.loadModel(name);
+  await provider.loadModel(name);
   state.loadedByUs.add(name);
-  const modelId = await foundry.resolveModelId(state.baseUrl, name, config.foundry.statusTimeoutMs);
+  const modelId = await provider.resolveModelId(state.baseUrl, name, config.foundry.statusTimeoutMs);
 
   state.modelId = modelId;
   config.model.alias = name;
@@ -859,9 +885,9 @@ async function attachFoundry({ load = false } = {}) {
 
   if (load && state.managed && state.baseUrl && config.model.alias) {
     try {
-      const didLoad = await foundry.ensureLoaded(config.model.alias);
+      const didLoad = await provider.ensureLoaded(config.model.alias);
       if (didLoad) state.loadedByUs.add(config.model.alias);
-      state.modelId = await foundry.resolveModelId(state.baseUrl, config.model.alias, config.foundry.statusTimeoutMs);
+      state.modelId = await provider.resolveModelId(state.baseUrl, config.model.alias, config.foundry.statusTimeoutMs);
     } catch (error) {
       resolved.reason = error.message;
     }
@@ -883,17 +909,18 @@ async function attachFoundry({ load = false } = {}) {
 }
 
 async function foundryState() {
-  const install = await foundry.isInstalled();
+  const install = await provider.isInstalled();
   if (!install.installed) {
     return {
       installed: false,
       running: false,
-      message: "Foundry Local is not installed, or is not on this account's PATH.",
-      docs: "https://learn.microsoft.com/en-us/azure/foundry-local/"
+      provider: providerInfo(),
+      message: `${provider.label} is not installed, or is not on this account's PATH.`,
+      docs: provider.docsUrl
     };
   }
 
-  const status = await foundry.serverStatus();
+  const status = await provider.serverStatus();
   const running = Boolean(status?.running);
 
   // The question people actually have is "what is this costing me?". A loaded
@@ -938,7 +965,8 @@ async function foundryState() {
       port: state.port,
       managed: state.managed
     },
-    docs: "https://learn.microsoft.com/en-us/azure/foundry-local/"
+    provider: providerInfo(),
+    docs: provider.docsUrl
   };
 }
 
@@ -947,7 +975,7 @@ async function foundryState() {
 async function measureResources(pid) {
   if (!pid) return null;
   try {
-    const result = await foundry.processMemory(pid);
+    const result = await provider.processMemory(pid);
     return result ? { daemonMemoryMb: result } : null;
   } catch {
     return null;
@@ -958,8 +986,8 @@ async function measureResources(pid) {
 async function measureCache() {
   try {
     const [models, settings] = await Promise.all([
-      foundry.cachedModels().catch(() => []),
-      foundry.settings().catch(() => [])
+      provider.cachedModels().catch(() => []),
+      provider.settings().catch(() => [])
     ]);
 
     const cached = models.filter(model => model.cached !== false);
@@ -990,7 +1018,7 @@ const server = http.createServer((req, res) => {
       return sendJson(res, 200, { enabled: agents.conversationEnabled(), csrfToken: agents.csrfToken });
     }
     if (urlPath === "/api/status") return probeFoundry().then(value => sendJson(res, 200, {
-      ...value, conversationTools: agents.conversationEnabled(), orchestrator: agents.orchestrator(),
+      ...value, provider: providerInfo(), conversationTools: agents.conversationEnabled(), orchestrator: agents.orchestrator(),
       privacy: { ...agents.privacy(), readerEnabled: config.reader.enabled }
     }));
     if (urlPath === "/api/diagnostics") {
@@ -1009,7 +1037,7 @@ const server = http.createServer((req, res) => {
         .catch(error => sendJson(res, 500, { error: error.message }));
     }
     if (urlPath === "/api/foundry/settings") {
-      return foundry.settings()
+      return provider.settings()
         .then(items => sendJson(res, 200, { settings: items }))
         .catch(error => sendJson(res, 500, { error: error.message }));
     }
@@ -1080,7 +1108,7 @@ const server = http.createServer((req, res) => {
     }
     if (urlPath === "/api/foundry/catalogue") {
       const query = new URL(req.url, "http://localhost").searchParams;
-      return foundry.catalogue({
+      return provider.catalogue({
         device: query.get("device"),
         type: query.get("type"),
         search: query.get("search"),
@@ -1163,8 +1191,8 @@ const server = http.createServer((req, res) => {
       return readBody(req, 2048)
         .then(async raw => {
           const { key, value } = JSON.parse(raw || "{}");
-          await foundry.setSetting(key, value);
-          return sendJson(res, 200, { settings: await foundry.settings() });
+          await provider.setSetting(key, value);
+          return sendJson(res, 200, { settings: await provider.settings() });
         })
         .catch(error => sendJson(res, 400, { error: error.message }));
     }
@@ -1331,14 +1359,14 @@ const server = http.createServer((req, res) => {
             if (alias === config.model.alias) {
               return sendJson(res, 400, { error: "That model is in use. Switch to another one first." });
             }
-            await foundry.removeModel(alias);
+            await provider.removeModel(alias);
             state.loadedByUs.delete(alias);
           } else {
             // Progress is recorded as it arrives so the page can poll for it.
             // A multi-gigabyte download otherwise looks identical to a hang.
             state.downloads.set(alias, { percent: 0, sizeMb: null, startedAt: Date.now() });
             try {
-              await foundry.downloadModel(alias, progress => {
+              await provider.downloadModel(alias, progress => {
                 const entry = state.downloads.get(alias);
                 if (entry) Object.assign(entry, { percent: progress.percent, sizeMb: progress.sizeMb });
               });
@@ -1349,16 +1377,16 @@ const server = http.createServer((req, res) => {
             state.downloads.delete(alias);
           }
 
-          return sendJson(res, 200, { alias, models: await foundry.catalogue({}) });
+          return sendJson(res, 200, { alias, models: await provider.catalogue({}) });
         })
         .catch(error => sendJson(res, 400, { error: error.message }));
     }
 
     if (urlPath === "/api/foundry/start" || urlPath === "/api/foundry/stop" || urlPath === "/api/foundry/restart") {
       const action = urlPath.split("/").pop();
-      const run = action === "start" ? foundry.startServer
-        : action === "stop" ? foundry.stopServer
-        : foundry.restartServer;
+      const run = action === "start" ? provider.startServer
+        : action === "stop" ? provider.stopServer
+        : provider.restartServer;
 
       return run()
         .then(async () => {
@@ -1379,10 +1407,10 @@ const server = http.createServer((req, res) => {
         .then(async raw => {
           const { alias, variant } = JSON.parse(raw || "{}");
           if (urlPath.endsWith("unload")) {
-            if (alias === config.model.alias || (variant && foundry.variantName(variant) === config.model.alias)) {
+            if (alias === config.model.alias || (variant && provider.variantName(variant) === config.model.alias)) {
               return sendJson(res, 400, { error: "That model is in use. Switch to another one first." });
             }
-            await foundry.unloadModel(alias);
+            await provider.unloadModel(alias);
             state.loadedByUs.delete(alias);
             return sendJson(res, 200, await listAgentModels());
           }
@@ -1431,14 +1459,14 @@ async function resolveFoundry() {
   const managed = !baseUrl;
 
   if (!baseUrl) {
-    const endpoint = await foundry.discoverEndpoint();
-    if (!endpoint) return { baseUrl: null, modelId: null, managed, reason: "Foundry Local is not running." };
+    const endpoint = await provider.discoverEndpoint();
+    if (!endpoint) return { baseUrl: null, modelId: null, managed, reason: `${provider.label} is not running.` };
     baseUrl = endpoint.endsWith(config.foundry.apiPrefix) ? endpoint : endpoint + config.foundry.apiPrefix;
   }
 
   baseUrl = baseUrl.replace(/\/+$/, "");
   try {
-    foundry.assertLoopback(baseUrl);
+    provider.assertLoopback(baseUrl);
   } catch (error) {
     fail(`${error.message}\n\nThis application is loopback-only by design and will not contact a remote endpoint.`);
   }
@@ -1446,7 +1474,7 @@ async function resolveFoundry() {
   let modelId = config.model.id;
   if (!modelId) {
     try {
-      modelId = await foundry.resolveModelId(baseUrl, config.model.alias, config.foundry.statusTimeoutMs);
+      modelId = await provider.resolveModelId(baseUrl, config.model.alias, config.foundry.statusTimeoutMs);
     } catch (error) {
       return { baseUrl, modelId: null, managed, reason: error.message };
     }
@@ -1459,7 +1487,7 @@ async function resolveFoundry() {
 // means the user's first real message is not the one that waits for it.
 async function warmUp() {
   try {
-    await inferenceQueue.run(() => foundry.chatCompletion(state.baseUrl, {
+    await inferenceQueue.run(() => provider.chatCompletion(state.baseUrl, {
       model: state.modelId,
       messages: [{ role: "user", content: "Hi" }],
       stream: false,
@@ -1495,6 +1523,12 @@ async function main() {
   });
   agents = createAgentService();
 
+  // Ollama is normally left running in the background. If it is not, starting it
+  // here saves a trip to the panel. A missing install is simply left alone.
+  if (provider.name === "ollama" && config.ollama.autoStart && !config.foundry.baseUrl) {
+    await provider.startServer(20000).catch(() => {});
+  }
+
   const resolved = await resolveFoundry();
   state.baseUrl = resolved.baseUrl;
   state.modelId = resolved.modelId;
@@ -1528,11 +1562,11 @@ async function main() {
 
   if (state.modelId) {
     console.log(`  Model:   ${state.modelId}  (alias: ${config.model.alias})`);
-    console.log(`  Foundry: ${state.baseUrl}`);
+    console.log(`  ${provider.label}: ${state.baseUrl}`);
   } else {
     console.log(`  Model:   not ready - ${resolved.reason}`);
-    console.log(`  Foundry: ${state.baseUrl || "not running"}`);
-    console.log(`\n  Open the page and use the Foundry panel to start it.`);
+    console.log(`  ${provider.label}: ${state.baseUrl || "not running"}`);
+    console.log(`\n  Open the page and use the ${provider.label} panel to start it.`);
   }
   console.log(`  State:   ${stateFile}`);
   console.log(`\n  Press Ctrl+C to stop.\n`);
@@ -1568,18 +1602,18 @@ async function releaseResources() {
     for (const alias of state.loadedByUs) {
       try {
         process.stdout.write(`  Releasing ${alias} from memory... `);
-        await foundry.unloadModel(alias, 30000);
+        await provider.unloadModel(alias, 30000);
         console.log("done");
       } catch {
-        console.log("could not unload; it will be released when Foundry stops");
+        console.log(`could not unload; it will be released when ${provider.label} stops`);
       }
     }
   }
 
   if (config.foundry.stopServiceOnExit) {
     try {
-      process.stdout.write("  Stopping the Foundry service... ");
-      await foundry.stopServer(30000);
+      process.stdout.write(`  Stopping the ${provider.label} service... `);
+      await provider.stopServer(30000);
       console.log("done");
     } catch {
       console.log("could not stop it");

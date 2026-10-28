@@ -12,6 +12,7 @@
     "portSearchLimit": 20,
     "openBrowser": true
   },
+  "provider": "foundry",
   "model": {
     "alias": "phi-4"
   },
@@ -24,6 +25,12 @@
     "warmUpTimeoutMs": 300000,
     "unloadOnExit": true,
     "stopServiceOnExit": false
+  },
+  "ollama": {
+    "baseUrl": null,
+    "keepAlive": "30m",
+    "binary": null,
+    "autoStart": true
   },
   "chat": {
     "systemPrompt": "You are a helpful, concise local assistant.",

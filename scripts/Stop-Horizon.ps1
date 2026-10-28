@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
     Stops the local website, unloads the model, and stops the Foundry Local service.
+    With Ollama it unloads the model and leaves Ollama running.
 
 .EXAMPLE
     .\Stop-Horizon.ps1
@@ -18,7 +19,11 @@ $ErrorActionPreference = 'Continue'
 . (Join-Path $PSScriptRoot 'Common-Horizon.ps1')
 
 $config = Get-HorizonConfig
-if (-not $ModelAlias) { $ModelAlias = $config.model.alias }
+$provider = if ($env:HORIZON_PROVIDER) { $env:HORIZON_PROVIDER }
+    elseif ($config.PSObject.Properties.Name -contains 'provider') { $config.provider }
+    else { 'foundry' }
+$provider = "$provider".Trim().ToLowerInvariant()
+if (-not $ModelAlias) { $ModelAlias = if ($provider -eq 'ollama') { 'llama3.2:3b' } else { $config.model.alias } }
 
 Write-Host ""
 Write-Host "Stopping $($config.app.displayName)" -ForegroundColor White
@@ -57,15 +62,24 @@ if ($state -and $state.pid) {
 }
 
 Write-HorizonStep "Step 2 of 3: unloading the model '$ModelAlias'..."
-if (Get-Command foundry -ErrorAction SilentlyContinue) {
+if ($provider -eq 'ollama') {
+    if (Get-Command ollama -ErrorAction SilentlyContinue) {
+        ollama stop $ModelAlias 2>&1 | Out-Null
+        Write-HorizonOk 'Model unloaded from memory.'
+    } else {
+        Write-HorizonDetail 'The ollama command is not available, so nothing to unload.'
+    }
+} elseif (Get-Command foundry -ErrorAction SilentlyContinue) {
     foundry model unload $ModelAlias
     Write-HorizonOk 'Model unloaded from memory.'
 } else {
     Write-HorizonDetail 'The foundry command is not available, so nothing to unload.'
 }
 
-Write-HorizonStep 'Step 3 of 3: stopping the Foundry service...'
-if ($KeepService) {
+Write-HorizonStep 'Step 3 of 3: stopping the model service...'
+if ($provider -eq 'ollama') {
+    Write-HorizonDetail 'Ollama is left running. It frees idle models by itself; quit it from the system tray if you want it gone.'
+} elseif ($KeepService) {
     Write-HorizonDetail 'Left running because -KeepService was specified.'
 } elseif (Get-Command foundry -ErrorAction SilentlyContinue) {
     foundry server stop
