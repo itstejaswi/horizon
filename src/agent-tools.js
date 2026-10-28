@@ -612,6 +612,14 @@ function currentBrowserRun(signal) {
   return browserRuns.get(signal);
 }
 
+// Prefer the bundled Chromium. Where it could not be installed (for example
+// when security software blocks unpacking it), drive the installed Microsoft
+// Edge instead. Either way Playwright launches a fresh temporary profile, never
+// the user's own browser profile, and the isolation below is identical.
+function browserLaunchOptions(chromium, exists = fs.existsSync) {
+  return exists(chromium.executablePath()) ? {} : { channel: "msedge" };
+}
+
 async function ensureBrowser(run) {
   if (run.context) return run;
   if (run.pending) return run.pending;
@@ -621,6 +629,7 @@ async function ensureBrowser(run) {
     try {
       const { chromium } = require("playwright");
       browser = await chromium.launch({
+        ...browserLaunchOptions(chromium),
         headless: true,
         proxy: { server: proxy.address, bypass: "<-loopback>" },
         args: [
@@ -858,4 +867,4 @@ async function closeRun(signal) {
   }
 }
 
-module.exports = { definitions, execute, closeRun, close };
+module.exports = { definitions, execute, closeRun, close, browserLaunchOptions };

@@ -8,11 +8,16 @@ const vm = require("node:vm");
 
 const script = fs.readFileSync(path.join(__dirname, "..", "tools", "setup-agent-runtime.js"), "utf8");
 
-function setup({ installed = false, status = 0, args = [] } = {}) {
+const EDGE = path.join("C:\\Program Files (x86)", "Microsoft", "Edge", "Application", "msedge.exe");
+
+function setup({ installed = false, edge = false, status = 0, args = [] } = {}) {
   const calls = [], errors = [], logs = [];
-  const process = { argv: ["node", "setup-agent-runtime.js", ...args], execPath: "test-node", exitCode: 0 };
+  const process = {
+    argv: ["node", "setup-agent-runtime.js", ...args], execPath: "test-node", exitCode: 0,
+    env: { "ProgramFiles(x86)": "C:\\Program Files (x86)" }
+  };
   const fakeRequire = name => {
-    if (name === "node:fs") return { existsSync: () => installed };
+    if (name === "node:fs") return { existsSync: file => file === EDGE ? edge : installed };
     if (name === "node:path") return path;
     if (name === "playwright") return { chromium: { executablePath: () => "chromium" } };
     if (name === require.resolve("playwright/package.json")) return require(name);
@@ -49,6 +54,14 @@ test("setup check mode never downloads and reports missing or existing Chromium 
     assert.equal(result.process.exitCode, installed ? 0 : 1);
     assert.equal(result.calls.length, 0);
   }
+});
+
+test("an installed Edge satisfies setup without downloading Chromium", () => {
+  const result = setup({ edge: true });
+  assert.equal(result.process.exitCode, 0);
+  assert.equal(result.calls.length, 0);
+  assert.match(result.logs.join("\n"), /installed Microsoft Edge/);
+  assert.equal(setup({ edge: true, args: ["--check"] }).process.exitCode, 0);
 });
 
 test("failed browser installation surfaces failure without claiming runtime readiness", () => {

@@ -262,3 +262,9 @@ test("closeRun terminates an MCP stdio process bound to the run signal", async (
     await rejected;
   });
 });
+
+test("browser tools prefer bundled Chromium and fall back to the installed Edge", () => {
+  const chromium = { executablePath: () => "bundled-chromium" };
+  assert.deepEqual(tools.browserLaunchOptions(chromium, file => file === "bundled-chromium"), {});
+  assert.deepEqual(tools.browserLaunchOptions(chromium, () => false), { channel: "msedge" });
+});

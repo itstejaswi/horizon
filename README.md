@@ -226,7 +226,7 @@ Agent schedules are interval-based and persistent. They run only while the serve
 
 Agents continue to use local model inference; enabling network-capable tools does not send inference to a cloud model. However, browser, command and MCP tools may use the network, so a tool-enabled session is **not an air-gap guarantee**. The Connection/privacy status distinguishes local inference from network-capable tools and reports whether external tools are enabled or have been used. Agent history records runs and tool events/results (bounded to 100 runs / 16 MB, with up to 150 events per run); it is **not a network audit log** and does not record every network request made by a command or MCP subprocess. There are no cloud API keys or cloud token charges for Agents; local model usage is still limited by the model's context window.
 
-The browser dependency is provisioned during one-time Horizon setup. MCP servers are external executables: install and maintain each trusted MCP server yourself before configuring it.
+The browser dependency is provisioned during one-time Horizon setup. If Microsoft Edge is installed and Playwright's own Chromium is not, browser tools use Edge instead and nothing is downloaded; it still runs headless with a fresh temporary profile (never your Edge profile, sign-ins or history) behind the same public-HTTPS proxy. MCP servers are external executables: install and maintain each trusted MCP server yourself before configuring it.
 
 ## Everyday use
 
