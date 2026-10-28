@@ -487,3 +487,13 @@ test("fixed workflows remain deterministic when OpenClaw is selected", async t =
   assert.equal(service.getRun(run.id).status, "completed");
   assert.equal(calls.length, 1);
 });
+
+test("replies are attributed to OpenClaw only when it orchestrates conversation tools", t => {
+  const { service, settings } = fixture(t, { orchestrate: async () => "" });
+  assert.equal(service.orchestrator(), "Horizon");
+  settings.backend = "openclaw";
+  service.saveSettings(settings);
+  assert.equal(service.orchestrator(), "OpenClaw");
+  service.saveSettings({ ...settings, chat: { ...settings.chat, enabled: false } });
+  assert.equal(service.orchestrator(), "Horizon", "with conversation tools off, chat goes straight to the model");
+});

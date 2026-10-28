@@ -258,6 +258,12 @@ class AgentService {
     };
   }
 
+  // Who coordinates an ordinary chat reply: OpenClaw only when conversation
+  // tools are on and it is the selected backend; otherwise Horizon itself.
+  orchestrator() {
+    return this.conversationEnabled() && this.data.settings.backend === "openclaw" ? "OpenClaw" : "Horizon";
+  }
+
   conversationEnabled() {
     const settings = this.data.settings;
     return settings.enabled && settings.chat.enabled &&

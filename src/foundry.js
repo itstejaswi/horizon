@@ -14,6 +14,14 @@ function isSafeAlias(alias) {
   return typeof alias === "string" && SAFE_ALIAS.test(alias);
 }
 
+// "qwen2.5-3b-instruct-generic-cpu:2" -> "qwen2.5-3b-instruct-generic-cpu".
+// Loading by this name pins one downloaded build; a bare alias lets Foundry
+// pick another build (often a GPU one) that may not be downloaded or may not
+// run on this machine.
+function variantName(id) {
+  return String(id || "").replace(/:\d+$/, "");
+}
+
 // Arguments are passed as a real argv array with no shell involved, so they
 // are never concatenated into a command string and cannot be used to inject
 // further commands. This is the primary defence; isSafeAlias is the second.
@@ -273,7 +281,9 @@ async function unloadModel(alias, timeoutMs = 120000) {
 // be used as a readiness signal. "foundry cache list" carries the real flag.
 async function isModelLoaded(alias, timeoutMs = 20000) {
   const models = await cachedModels(timeoutMs);
-  const entry = models.find(model => model.alias === alias);
+  // The configured name may be an alias or an exact build (see variantName).
+  const entry = models.find(model => model.alias === alias && model.loaded) ||
+    models.find(model => variantName(model.id) === alias);
   return Boolean(entry && entry.loaded);
 }
 
@@ -508,6 +518,7 @@ async function endpointAlive(baseUrl, timeoutMs = 4000) {
 module.exports = {
   ENDPOINT_PATTERN,
   agentCompletion,
+  variantName,
   isSafeAlias,
   mergeLoadState,
   isInstalled,

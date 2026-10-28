@@ -172,7 +172,9 @@ A left rail holds everything, in the way you would expect from a modern chat app
 | **Traffic** | What was sent and received, at a recording level you choose. |
 | **Settings** | Instructions, creativity, storage usage, and a single button to erase everything. |
 
-The model picker sits in the top bar. It lists every model on your machine with its hardware target and size; choosing one switches live, with no restart, keeping your conversation.
+The model picker sits in the top bar. It lists every model on your machine with its hardware target and size; choosing one switches live, with no restart, keeping your conversation. It loads exactly the downloaded build you picked: Foundry is never asked for the bare alias, which can make it choose a different build (often a GPU one) that is not downloaded or cannot run on this machine. To pin a default the same way, set `model.alias` in `config.local.json` to the build's name, for example `qwen2.5-3b-instruct-generic-cpu`.
+
+Each reply is labelled with what orchestrated it: **Horizon**, or **OpenClaw** when that backend handles conversation tools. Hover the label to see the model that wrote it.
 
 Light, dark, and match-Windows themes are in the top right. Your choice is remembered.
 
