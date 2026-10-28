@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { createOpenClawOrchestrator, runtimeStatus, buildConfig, finalText } = require("../src/openclaw-runtime");
+const { createOpenClawOrchestrator, runtimeStatus, buildConfig, buildMessage, finalText } = require("../src/openclaw-runtime");
 const { AgentService, DEFAULT_SETTINGS } = require("../src/agents");
 
 const FAKE = path.join(__dirname, "fixtures", "fake-openclaw.mjs");
@@ -113,6 +113,9 @@ test("generated config allows only granted bridge tools and the local provider",
   assert.equal(config.models.providers.horizon.baseUrl, "http://127.0.0.1:1234/v1");
   assert.deepEqual(config.agents.defaults.model, { primary: "horizon/horizon-local", fallbacks: [] });
   assert.deepEqual(config.agents.defaults.skills, []);
+  assert.equal(config.agents.defaults.contextInjection, "never");
+  assert.equal(config.agents.defaults.experimental, undefined, "lean mode replaces granted tools with a wrapper the broker refuses");
+  assert.match(buildMessage({ agent: { instructions: "" }, prompt: "Go", settings }), /relative to an approved folder/);
 });
 
 test("runtime status reports missing, mismatched and unsupported installs", t => {

@@ -1,5 +1,6 @@
 "use strict";
 
+const http = require("http");
 const { execFile, spawn } = require("child_process");
 const { isLoopbackHost } = require("./net");
 
@@ -366,6 +367,49 @@ async function chatCompletion(baseUrl, body, timeoutMs) {
   }, timeoutMs);
 }
 
+// Agent completions on a slow CPU can take longer than fetch's fixed
+// five-minute wait for response headers. This plain loopback request has no
+// timeout of its own: the run's signal carries Stop and the run time limit.
+function agentCompletion(baseUrl, body, signal, maxBytes = 262144) {
+  const url = new URL(`${baseUrl}/chat/completions`);
+  if (url.protocol !== "http:" || !isLoopbackHost(url.hostname)) {
+    return Promise.reject(new Error("Agent inference must use a loopback HTTP endpoint."));
+  }
+  const payload = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    const request = http.request(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
+    }, response => {
+      const chunks = [];
+      let bytes = 0;
+      response.on("data", chunk => {
+        bytes += chunk.length;
+        if (bytes > maxBytes) request.destroy(new Error("Agent model response exceeded 256 KB."));
+        else chunks.push(chunk);
+      });
+      response.on("end", () => {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return reject(new Error(`Foundry agent request failed (HTTP ${response.statusCode}): ${raw.slice(0, 1000)}`));
+        }
+        try {
+          resolve(JSON.parse(raw));
+        } catch {
+          reject(new Error("Foundry returned an unreadable agent response."));
+        }
+      });
+      response.on("error", reject);
+    });
+    const abort = () => request.destroy(signal.reason || new Error("Agent request cancelled."));
+    signal.addEventListener("abort", abort, { once: true });
+    request.on("close", () => signal.removeEventListener("abort", abort));
+    request.on("error", reject);
+    request.end(payload);
+  });
+}
+
 // Opens a streaming completion. The caller owns the returned controller so it
 // can abort when the browser disconnects mid-reply.
 async function chatCompletionStream(baseUrl, body, signal) {
@@ -463,6 +507,7 @@ async function endpointAlive(baseUrl, timeoutMs = 4000) {
 
 module.exports = {
   ENDPOINT_PATTERN,
+  agentCompletion,
   isSafeAlias,
   mergeLoadState,
   isInstalled,

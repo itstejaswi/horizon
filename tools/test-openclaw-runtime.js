@@ -15,6 +15,7 @@ const { AgentService, DEFAULT_SETTINGS } = require("../src/agents");
 const tools = require("../src/agent-tools");
 const { createOpenClawOrchestrator, runtimeStatus } = require("../src/openclaw-runtime");
 const { isLoopbackHost } = require("../src/net");
+const { agentCompletion } = require("../src/foundry");
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
@@ -30,14 +31,7 @@ function localModel() {
   const baseUrl = url.href.replace(/\/$/, "");
   return {
     model,
-    complete: async (body, signal) => {
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body, model, stream: false }), signal, redirect: "error"
-      });
-      if (!response.ok) throw new Error(`Local inference failed (HTTP ${response.status}): ${(await response.text()).slice(0, 1000)}`);
-      return response.json();
-    }
+    complete: (body, signal) => agentCompletion(baseUrl, { ...body, model, stream: false }, signal)
   };
 }
 
@@ -103,7 +97,8 @@ async function main() {
   try {
     const settings = { ...structuredClone(DEFAULT_SETTINGS), enabled: true, backend: "openclaw", roots: [files] };
     settings.flags.files = true;
-    settings.chat = { ...settings.chat, tools: ["file_read", "file_write"], maxSteps: 4, timeoutMs: 300000 };
+    // CPU inference with OpenClaw's long system prompt can take minutes per call.
+    settings.chat = { ...settings.chat, tools: ["file_read", "file_write"], maxSteps: 4, timeoutMs: real ? 1800000 : 300000 };
     service.saveSettings(settings);
     const ask = "Read source.txt in the approved folder, then create copy.txt with exactly the same content.";
     const expectWrite = run => {
@@ -120,6 +115,9 @@ async function main() {
       approvals++;
       service.approve(pending.id, pending.approval.id, true);
     });
+    if (run.status !== "completed") {
+      console.error(run.events.map(event => `${new Date(event.at).toISOString().slice(11, 19)} ${event.type}: ${event.message}`).join("\n"));
+    }
     assert.equal(run.status, "completed", run.error || "OpenClaw did not complete the task.");
     assert.equal(approvals, 1, "The write needs exactly one exact-call approval.");
     assert.equal(fs.readFileSync(path.join(files, "copy.txt"), "utf8"), original);

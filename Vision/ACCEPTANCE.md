@@ -44,8 +44,33 @@ exactly the granted `horizon_*` tools. Separately, the real Horizon server
 with a stub Foundry endpoint completed an OpenClaw chat from the UI; the
 endpoint received the selected model ID and only granted tools.
 
-**No real local model has been run through OpenClaw yet.** Foundry Local was
-not available in the environment used. That is the next acceptance step.
+### Real local models on a small laptop, 28–29 October 2026
+
+Foundry Local 0.12.1 on an i3-1125G4 laptop with **7.7 GB RAM** and Intel UHD
+integrated graphics. Same task each run: read `source.txt`, write an identical
+`copy.txt`; the test approves only an exact match. **No run passed.** Every
+wrong action was stopped at approval and nothing incorrect was written.
+
+| Model | Backend | Result | Time per run | What happened |
+|---|---|---|---|---|
+| qwen2.5-3b GPU build | OpenClaw | crash | — | Foundry's daemon crashed on a ~2.5k-token prompt; the iGPU runs out of shared memory |
+| qwen2.5-3b CPU build (3.0 GB) | OpenClaw | 0/3 | 5–8 min | Reached the write every time but asked to write `{{.}}`, `$(cat source.txt)`, or into an invented `approvedFolders\` folder |
+| Phi-4-mini CPU build (4.8 GB) | OpenClaw | 0/3 | 13–30 min | Two runs timed out on the first decision; one replied without attempting the write |
+| Phi-4-mini CPU build (4.8 GB) | native | — | — | Swapping froze the laptop; abandoned |
+
+The plumbing held throughout: real model calls went through the broker to
+Foundry, tool calls through Horizon's approvals, failures surfaced as failures.
+What failed is capacity and small-model reasoning. Lessons applied in code:
+Node's `fetch` waits at most five minutes for response headers, so agent
+inference now uses a plain loopback request bounded by the run's own time
+limit; OpenClaw's workspace and persona files are no longer injected (−18%
+prompt); the model is told it may use paths relative to an approved folder.
+OpenClaw's `localModelLean` mode must stay off: it replaces granted tools with
+a generic `tool_call` wrapper, which the broker refuses.
+
+On hardware like this, prefer the native engine. **The real-model OpenClaw gate
+remains open** until it passes on a machine with enough memory for a capable
+tool-calling model.
 
 | Gate | Status |
 |---|---|
@@ -53,7 +78,7 @@ not available in the environment used. That is the next acceptance step.
 | Missing/incompatible runtime | Met: missing, version-mismatched and old-Node states reported; selection refused; runs fail explicitly |
 | Local model routing | Met with stub endpoint: model ID forced by server, no provider fallbacks, provider keys not inherited |
 | Chat and saved agents | Chat met (real runtime); saved-agent runs share the path but were not run against the real runtime |
-| Dependent file task | Met with scripted decisions; **not yet with a real model** |
+| Dependent file task | Met with scripted decisions; **real models 0/6 on a 7.7 GB laptop** (see above) |
 | Browser / fixed command / browser-to-script / MCP | **Not yet exercised** through OpenClaw |
 | Denied action | Met (real runtime) |
 | Concurrent file change | Relies on the unchanged native file tools; not separately exercised through OpenClaw |

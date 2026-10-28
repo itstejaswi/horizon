@@ -69,23 +69,7 @@ function createAgentService() {
       throw new Error(status.error || "Load a local model before running a model-driven agent.");
     }
     foundry.assertLoopback(state.baseUrl);
-    const response = await fetch(`${state.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, model: state.modelId, stream: false }),
-      signal,
-      redirect: "error"
-    });
-    const chunks = [];
-    let bytes = 0;
-    for await (const chunk of response.body) {
-      bytes += chunk.length;
-      if (bytes > 262144) throw new Error("Agent model response exceeded 256 KB.");
-      chunks.push(chunk);
-    }
-    const raw = Buffer.concat(chunks).toString("utf8");
-    if (!response.ok) throw new Error(`Foundry agent request failed (HTTP ${response.status}): ${raw.slice(0, 1000)}`);
-    return JSON.parse(raw);
+    return foundry.agentCompletion(state.baseUrl, { ...body, model: state.modelId, stream: false }, signal);
   }, signal);
   return new AgentService({
     directory: config.runtime.directory,
