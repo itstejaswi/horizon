@@ -1,7 +1,10 @@
 "use strict";
 
 const { execFile, spawn } = require("child_process");
-const { isLoopbackHost } = require("./net");
+const { createClient, parseServerSentEvents } = require("./openai-client");
+
+const client = createClient({ label: "Foundry", reachName: "Foundry Local" });
+const { assertLoopback, listModels, chatCompletion, agentCompletion, chatCompletionStream, endpointAlive } = client;
 
 const ENDPOINT_PATTERN = /https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?/i;
 
@@ -294,50 +297,6 @@ async function discoverEndpoint(timeoutMs = 15000) {
   return match ? match[0].replace(/\/+$/, "") : null;
 }
 
-function assertLoopback(baseUrl) {
-  let parsed;
-  try {
-    parsed = new URL(baseUrl);
-  } catch {
-    throw new Error(`Invalid Foundry base URL: ${baseUrl}`);
-  }
-  if (!isLoopbackHost(parsed.hostname)) {
-    throw new Error(`Refusing to connect to a non-loopback Foundry endpoint: ${baseUrl}`);
-  }
-  return parsed;
-}
-
-async function fetchJson(url, options = {}, timeoutMs = 30000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    const text = await response.text();
-    let payload = null;
-    if (text) {
-      try {
-        payload = JSON.parse(text);
-      } catch {
-        payload = { raw: text };
-      }
-    }
-    return { ok: response.ok, status: response.status, payload };
-  } catch (error) {
-    if (error.name === "AbortError") {
-      throw new Error(`Foundry did not respond within ${timeoutMs} ms. The model may still be loading.`);
-    }
-    throw new Error(`Could not reach Foundry Local at ${url}. The service may have stopped (${error.message}).`);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function listModels(baseUrl, timeoutMs) {
-  const result = await fetchJson(`${baseUrl}/models`, { method: "GET" }, timeoutMs);
-  if (!result.ok) throw new Error(`Foundry returned HTTP ${result.status} for /models.`);
-  return Array.isArray(result.payload?.data) ? result.payload.data : [];
-}
-
 // Matches on the alias reported by Foundry rather than a hardcoded name
 // pattern, so any Foundry model works without code changes.
 function selectModel(models, alias) {
@@ -356,62 +315,6 @@ async function resolveModelId(baseUrl, alias, timeoutMs) {
     throw new Error(`No loaded model matches alias "${alias}". Loaded models: ${available}.`);
   }
   return model.id;
-}
-
-async function chatCompletion(baseUrl, body, timeoutMs) {
-  return fetchJson(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  }, timeoutMs);
-}
-
-// Opens a streaming completion. The caller owns the returned controller so it
-// can abort when the browser disconnects mid-reply.
-async function chatCompletionStream(baseUrl, body, signal) {
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify({ ...body, stream: true }),
-    signal
-  });
-
-  if (!response.ok) {
-    let message = `Foundry returned HTTP ${response.status}.`;
-    try {
-      const payload = JSON.parse(await response.text());
-      if (payload?.error?.message) message = payload.error.message;
-    } catch { /* keep the generic message */ }
-    const error = new Error(message);
-    error.statusCode = response.status;
-    throw error;
-  }
-
-  return response;
-}
-
-// Turns a raw SSE byte stream into decoded event payloads.
-async function* parseServerSentEvents(response) {
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  for await (const chunk of response.body) {
-    buffer += decoder.decode(chunk, { stream: true });
-    const blocks = buffer.split(/\r?\n\r?\n/);
-    buffer = blocks.pop() || "";
-
-    for (const block of blocks) {
-      for (const line of block.split(/\r?\n/)) {
-        if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
-        if (!data) continue;
-        if (data === "[DONE]") return;
-        try {
-          yield JSON.parse(data);
-        } catch { /* ignore malformed keep-alive frames */ }
-      }
-    }
-  }
 }
 
 // Resident memory of a process, in MB. Used to show what the Foundry daemon is
@@ -444,23 +347,6 @@ function processMemory(pid, timeoutMs = 8000) {
   });
 }
 
-// A cheap liveness check for an endpoint we believe in. The daemon picks a new
-// port on every restart, so an address that worked a minute ago may now be
-// dead, and reporting readiness against a dead address is worse than an error.
-async function endpointAlive(baseUrl, timeoutMs = 4000) {
-  if (!baseUrl) return false;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(`${baseUrl}/models`, { signal: controller.signal });
-    return response.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 module.exports = {
   ENDPOINT_PATTERN,
   isSafeAlias,
@@ -488,6 +374,7 @@ module.exports = {
   selectModel,
   resolveModelId,
   chatCompletion,
+  agentCompletion,
   chatCompletionStream,
   parseServerSentEvents
 };

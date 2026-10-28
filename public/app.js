@@ -1392,6 +1392,11 @@ function brandMark(which) {
 
 // Horizon acts as a front end for the Foundry service: it reports whether
 // Foundry is installed and running, and can start, stop or restart it.
+// The model runtime in use, so wording follows the provider (Foundry Local or Ollama).
+function runtimeLabel() {
+  return state.provider?.label || "Foundry Local";
+}
+
 async function renderFoundryCard(card) {
   let data;
   try {
@@ -2121,11 +2126,12 @@ function renderSettings() {
     const button = el("button", "settings-nav-btn");
     button.type = "button";
     button.setAttribute("aria-current", String(section.id === settingsSection));
+    const isFoundryProvider = (state.provider?.name || "foundry") === "foundry";
     button.append(
-      section.id === "foundry"
+      section.id === "foundry" && isFoundryProvider
         ? foundryMark("i-foundry", "settings-nav-mark")
         : icon(section.icon, "settings-nav-icon"),
-      el("span", null, section.name));
+      el("span", null, section.id === "foundry" && !isFoundryProvider ? state.provider.label : section.name));
     button.addEventListener("click", () => {
       settingsSection = section.id;
       renderSettings();
@@ -2395,6 +2401,7 @@ async function refreshStatus() {
     refreshAirGap();
     $("chat-tools-settings").textContent = data.conversationTools ? "Tools available" : "Tools off";
     if (data.model) state.assistantLabel = data.model;
+    if (data.provider) state.provider = data.provider;
 
     // /api/status is the single source of truth for which model is active.
     // The picker used to keep its own copy, which drifted after a switch and
@@ -2569,7 +2576,7 @@ async function refreshWorkspaceStatus() {
     badge.dataset.state = !data.installed ? "error" : data.running ? "ready" : "warn";
     $("ws-status-text").textContent = !data.installed
       ? "Not installed"
-      : data.running ? `Foundry \u00B7 ${data.version || "running"}`.trim() : "Stopped";
+      : data.running ? `${state.provider?.name === "ollama" ? "Ollama" : "Foundry"} \u00B7 ${data.version || "running"}`.trim() : "Stopped";
   } catch {
     badge.dataset.state = "error";
     $("ws-status-text").textContent = "Unavailable";
@@ -2622,6 +2629,27 @@ async function renderCatalogue(body) {
     paintRows();
   });
   filters.append(search);
+
+  // Ollama can pull any model by name, so the catalogue is not the limit.
+  if (state.provider?.name === "ollama") {
+    const pullRow = el("div", "ws-filters");
+    const pullInput = el("input", "text-input ws-search");
+    pullInput.type = "text";
+    pullInput.placeholder = "Pull any model by name, e.g. qwen2.5:3b or hf.co/user/repo:Q4_K_M";
+    pullInput.setAttribute("aria-label", "Model name to pull");
+    const pullButton = el("button", "btn-primary", "Pull");
+    pullButton.type = "button";
+    const pull = () => {
+      const name = pullInput.value.trim();
+      if (!name) return;
+      pullInput.value = "";
+      runModelAction(name, "download", `Pulling ${name}`);
+    };
+    pullButton.addEventListener("click", pull);
+    pullInput.addEventListener("keydown", event => { if (event.key === "Enter") pull(); });
+    pullRow.append(pullInput, pullButton);
+    filters.append(pullRow);
+  }
 
   const chips = el("div", "chip-row");
   const addChip = (label, key, value) => {
@@ -2834,12 +2862,12 @@ async function renderService(body) {
 
   if (!data.installed) {
     const card = el("div", "ws-card");
-    card.append(el("div", "ws-card-title", "Foundry Local is not installed"));
+    card.append(el("div", "ws-card-title", `${runtimeLabel()} is not installed`));
     card.append(el("p", "panel-note", data.message));
 
     const steps = el("ol", "setup-steps");
     for (const [text, code] of [
-      ["Install it", "winget install Microsoft.FoundryLocal"],
+      ["Install it", state.provider?.name === "ollama" ? "winget install Ollama.Ollama" : "winget install Microsoft.FoundryLocal"],
       ["Close and reopen Horizon", null]
     ]) {
       const step = el("li");
@@ -2892,7 +2920,7 @@ async function renderService(body) {
         const response = await fetch(path, { method: "POST" });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "That did not work.");
-        setNote(`Foundry Local ${label === "Stop" ? "stopped" : "is running"}.`);
+        setNote(`${runtimeLabel()} ${label === "Stop" ? "stopped" : "is running"}.`);
         wsState.models = [];
         await Promise.all([refreshStatus(), refreshModels()]);
       } catch (error) {
@@ -3010,6 +3038,12 @@ const SETTING_META = {
 // page. Async, so the section is appended immediately and filled once the CLI
 // answers — otherwise it would jump the sections below it.
 async function renderFoundrySettings(parent) {
+  if (state.provider?.name === "ollama") {
+    const note = settingsCard(parent, "Ollama settings",
+      "Ollama is configured with OLLAMA_* environment variables (for example OLLAMA_KEEP_ALIVE and OLLAMA_MODELS), not from Horizon.");
+    return;
+  }
+
   const section = settingsCard(parent, "Foundry Local settings",
     "These persist between sessions. Changing one restarts the service.");
 
@@ -3023,7 +3057,7 @@ async function renderFoundrySettings(parent) {
   } catch {
     loading.remove();
     section.append(el("p", "field-hint",
-      "Settings could not be read. Foundry Local may not be installed on this computer."));
+      `Settings could not be read. ${runtimeLabel()} may not be installed on this computer.`));
     return;
   }
 
@@ -3031,7 +3065,7 @@ async function renderFoundrySettings(parent) {
 
   if (!settings.length) {
     section.append(el("p", "field-hint",
-      "Foundry Local reported no settings. It may not be installed on this computer."));
+      `${runtimeLabel()} reported no settings. It may not be installed on this computer.`));
     return;
   }
 

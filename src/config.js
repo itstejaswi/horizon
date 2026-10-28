@@ -66,8 +66,17 @@ function firstDefined(...values) {
 // Resolution order for every setting: CLI argument > environment variable >
 // config.local.json > config.json > built-in fallback.
 function loadConfig(argv = process.argv.slice(2), env = process.env) {
-  const file = merge(readJsonIfPresent(defaultsPath, true), readJsonIfPresent(localPath, false));
+  const local = readJsonIfPresent(localPath, false);
+  const file = merge(readJsonIfPresent(defaultsPath, true), local);
   const cli = parseCliArgs(argv);
+
+  // Which local runtime serves the model. Everything else about talking to it
+  // (timeouts, warm-up, unload on exit) is shared and lives under "foundry"
+  // for compatibility with existing config files.
+  const provider = String(firstDefined(cli.provider, env.HORIZON_PROVIDER, file.provider, "foundry")).trim().toLowerCase();
+  if (!["foundry", "ollama"].includes(provider)) {
+    throw new Error(`Invalid model provider: ${provider}. Use "foundry" or "ollama".`);
+  }
 
   const config = {
     rootDir,
@@ -91,8 +100,15 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
       // deliberate parallel instances (the test suite does).
       allowMultipleInstances: toBool(firstDefined(cli["allow-multiple-instances"], env.HORIZON_ALLOW_MULTIPLE_INSTANCES, file.web?.allowMultipleInstances), false)
     },
+    provider,
     model: {
-      alias: firstDefined(cli["model-alias"], env.HORIZON_MODEL_ALIAS, file.model?.alias, "phi-4"),
+      // The shipped default names a Foundry model, which Ollama would not
+      // recognise, so Ollama falls back to its own default unless the user
+      // chose a model themselves.
+      alias: firstDefined(
+        cli["model-alias"], env.HORIZON_MODEL_ALIAS, local.model?.alias,
+        provider === "ollama" ? "llama3.2:3b" : file.model?.alias, "phi-4"
+      ),
       id: firstDefined(cli["model-id"], env.FOUNDRY_MODEL_ID) || null
     },
     foundry: {
@@ -107,6 +123,15 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
       // by default the one we loaded is released on shutdown.
       unloadOnExit: toBool(firstDefined(cli["unload-on-exit"], env.HORIZON_UNLOAD_ON_EXIT, file.foundry?.unloadOnExit), true),
       stopServiceOnExit: toBool(firstDefined(cli["stop-service-on-exit"], env.HORIZON_STOP_SERVICE_ON_EXIT, file.foundry?.stopServiceOnExit), false)
+    },
+    ollama: {
+      // Null means the default loopback address. Only loopback is accepted.
+      baseUrl: firstDefined(cli["ollama-url"], env.HORIZON_OLLAMA_URL, file.ollama?.baseUrl) || null,
+      // How long Ollama keeps a model resident after Horizon loads it.
+      keepAlive: String(firstDefined(env.HORIZON_OLLAMA_KEEP_ALIVE, file.ollama?.keepAlive, "30m")),
+      binary: firstDefined(env.HORIZON_OLLAMA_BINARY, file.ollama?.binary) || null,
+      // Start Ollama when Horizon launches and it is not already running.
+      autoStart: toBool(firstDefined(env.HORIZON_OLLAMA_AUTOSTART, file.ollama?.autoStart), true)
     },
     chat: {
       systemPrompt: firstDefined(env.HORIZON_SYSTEM_PROMPT, file.chat?.systemPrompt, "You are a helpful, concise local assistant."),
