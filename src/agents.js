@@ -564,6 +564,7 @@ class AgentService {
       ...(history ? history.filter(message => message.role !== "system") : [{ role: "user", content: prompt }])
     ];
     let actions = 0;
+    let corrected = false;
     for (let turn = 0; turn <= agent.maxSteps; turn++) {
       signal.throwIfAborted();
       if (JSON.stringify(messages).length > 64000) throw new Error("Agent context exceeded 64000 characters. Reduce output or split the task.");
@@ -581,7 +582,16 @@ class AgentService {
         try {
           action = JSON.parse(text(message.content, "Model response", 24000));
         } catch (error) {
-          throw new Error(`Model did not follow the structured action protocol: ${error.message}. Try another model or native mode.`);
+          if (corrected) throw new Error(`Model did not follow the structured action protocol: ${error.message}. Try another model or native mode.`);
+          // Small models sometimes open with prose. As in planned mode, allow
+          // exactly one correction; nothing has executed from this reply.
+          corrected = true;
+          this.event(run, "retry", `Reply was not a JSON action; requesting one correction before acting: ${error.message}`);
+          messages.push({ role: "assistant", content: typeof message.content === "string" ? message.content : "" }, {
+            role: "user",
+            content: 'Your reply was not valid JSON. Reply with ONLY one JSON object: {"tool":"tool_name","args":{...}} to act, or {"final":"your answer"} to finish. No prose or markdown.'
+          });
+          continue;
         }
         object(action, "Model action");
         if (typeof action.final === "string" && Object.keys(action).length === 1) return text(action.final, "Final answer", 24000, true);

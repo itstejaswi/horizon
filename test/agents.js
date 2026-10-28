@@ -144,6 +144,25 @@ test("malformed structured output fails explicitly without executing a tool", as
   assert.equal(calls.length, 0);
 });
 
+test("one prose reply gets a single correction before any tool runs", async t => {
+  const replies = ["I'll help you with that!", '{"tool":"file_read","args":{"path":"note"}}', '{"final":"done"}'];
+  const prompts = [];
+  const { service, calls, save } = fixture(t, {
+    complete: async body => {
+      prompts.push(structuredClone(body.messages));
+      return { choices: [{ message: { content: replies.shift() } }] };
+    }
+  });
+  service.run(save().id);
+  await until(() => terminal.has(service.data.runs[0].status));
+  const run = service.data.runs[0];
+  assert.equal(run.status, "completed", run.error);
+  assert.equal(run.result, "done");
+  assert.equal(calls.length, 1, "the prose reply itself executed nothing");
+  assert.ok(run.events.some(event => event.type === "retry"));
+  assert.match(prompts[1].at(-1).content, /not valid JSON/);
+});
+
 test("model cannot exceed tool budget or gain a tool through prompt content", async t => {
   let choice = "file_read";
   const { service, calls, save } = fixture(t, {
