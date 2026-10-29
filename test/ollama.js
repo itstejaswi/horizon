@@ -20,7 +20,7 @@ const { createOllama, isSafeAlias } = require(path.join(ROOT, "src", "ollama.js"
 const { createProvider } = require(path.join(ROOT, "src", "providers.js"));
 const { loadConfig } = require(path.join(ROOT, "src", "config.js"));
 
-function startStubOllama() {
+function startStubOllama({ completion } = {}) {
   const calls = [];
   const resident = new Set();
   const installed = new Map([
@@ -77,6 +77,7 @@ function startStubOllama() {
           return json(200, { data: [...installed.keys()].map(id => ({ id })) });
         }
         if (req.method === "POST" && url === "/v1/chat/completions") {
+          if (completion) return json(200, completion(body));
           return json(200, {
             model: body.model,
             choices: [{ message: { role: "assistant", content: "ollama stub reply" } }],
@@ -343,6 +344,59 @@ test("ollama: the server serves chat and model management through the provider",
     const dictation = await (await fetch(`${app.url}/api/dictation`)).json();
     assert.equal(dictation.available, false);
     assert.match(dictation.reason, /Foundry Local/);
+  } finally {
+    app.child.kill();
+    stub.server.close();
+  }
+});
+
+test("ollama: Horizon Native executes a real file tool through function calls and persists its outcome", async () => {
+  const stub = await startStubOllama({
+    completion: body => ({
+      choices: [{ message: body.messages.some(message => message.role === "tool")
+        ? { role: "assistant", content: "Read the observed native note." }
+        : {
+          role: "assistant", content: null,
+          tool_calls: [{ id: "read_note", type: "function", function: { name: "file_read", arguments: '{"path":"note.txt"}' } }]
+        } }]
+    })
+  });
+  const app = await startApp(ollamaEnv(stub, "stub:3b"));
+  try {
+    fs.writeFileSync(path.join(app.runtimeDir, "note.txt"), "Evidence from the actual file.");
+    const initial = await (await fetch(`${app.url}/api/agents`)).json();
+    const headers = { "Content-Type": "application/json", "X-Horizon-Agent-Token": initial.csrfToken };
+    const configured = await fetch(`${app.url}/api/agents/settings`, {
+      method: "POST", headers,
+      body: JSON.stringify({
+        ...initial.settings, enabled: true, roots: [app.runtimeDir],
+        flags: { files: true, commands: false, browser: false, mcp: false },
+        chat: { ...initial.settings.chat, protocol: "native", tools: ["file_read"], maxSteps: 1 }
+      })
+    });
+    assert.equal(configured.status, 200);
+    const started = await fetch(`${app.url}/api/chat`, {
+      method: "POST", headers,
+      body: JSON.stringify({ messages: [{ role: "user", content: "Read note.txt." }] })
+    });
+    assert.equal(started.status, 200);
+    const { run } = await started.json();
+    let finished;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      finished = await (await fetch(`${app.url}/api/agents/run?id=${encodeURIComponent(run.id)}`)).json();
+      if (["completed", "failed", "cancelled"].includes(finished.status)) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.equal(finished.status, "completed", JSON.stringify(finished));
+    assert.equal(finished.result, "Read the observed native note.");
+    assert.equal(finished.verification.status, "not_configured");
+    const requests = stub.calls.filter(call => call.url === "/v1/chat/completions");
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].body.tools[0].function.name, "file_read");
+    assert.match(requests[1].body.messages.at(-1).content, /Evidence from the actual file/);
+    assert.ok(finished.events.some(event => event.type === "backend" && /Horizon Native/.test(event.message)));
+    const disk = JSON.parse(fs.readFileSync(path.join(app.runtimeDir, "agent-data.json")));
+    assert.equal(disk.runs.find(item => item.id === run.id).status, "completed");
   } finally {
     app.child.kill();
     stub.server.close();

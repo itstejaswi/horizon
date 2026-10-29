@@ -298,6 +298,25 @@ npm test
 
 The regression suite runs entirely on this machine against a stub, so it needs no model, no GPU and no network. It covers config resolution, loopback enforcement, port fallback, path traversal, command injection, streaming, and behaviour when Foundry is not running.
 
+### Horizon Native tool execution
+
+Horizon Native coordinates model decisions and permitted tools without an
+OpenClaw process or dependency. Choose **Native tool calls** for a model that
+supports function calling, or **Structured actions** for the JSON action
+protocol. The provider selection and the tool protocol are separate settings;
+the engine does not silently switch protocols or grant tools.
+
+Model actions are checked against the available tool schemas before execution.
+One format/schema correction is allowed per run, without replaying a tool.
+Permission failures, execution failures and budget exhaustion stop explicitly.
+Run activity and chat errors identify the failure stage. Exact-call approvals,
+cancellation and configured task limits still apply.
+
+The lightweight loop reports tool execution, not independent outcome
+verification. Enable **Plan and verify native tasks** when its bounded plans
+and readback checks fit the task. Neither mode guarantees a small model will
+choose the right action.
+
 ### Opt-in local-agent validation
 
 `npm run test:local-agent` exercises experimental native planning against a real local model and can take several minutes. First load your chosen cached model yourself. Set the endpoint to your running Foundry service's actual loopback port and the model to its actual loaded ID from the cache list; replace both placeholders below:

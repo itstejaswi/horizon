@@ -309,4 +309,4 @@ Available tool schemas: ${JSON.stringify(definitions)}`
   }
 }
 
-module.exports = { plannedRun, planValue };
+module.exports = { plannedRun, planValue, validateCall };

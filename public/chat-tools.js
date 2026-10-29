@@ -121,7 +121,10 @@
             paint(run);
             if (terminal.has(run.status)) {
               control.finish();
-              if (run.status !== "completed") throw new Error(run.error || `Conversation ${run.status}.`);
+              if (run.status !== "completed") {
+                const stage = run.failure?.stage ? `Horizon Native (${run.failure.stage}): ` : "";
+                throw new Error(stage + (run.error || `Conversation ${run.status}.`));
+              }
               activity.open = false;
               return { reply: run.result, agentRunId: id };
             }

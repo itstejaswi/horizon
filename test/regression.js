@@ -471,6 +471,13 @@ test("ui: the page is installable as an app", () => {
 // Memory is not read by the model from anywhere -- it is injected as text into
 // the system prompt on every message. That is worth pinning: if this quietly
 // stopped, the app would still work and simply forget everything.
+test("ui: the composer hint stays neutral when model status changes", () => {
+  const app = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
+  const assignments = [...app.matchAll(/ui\.prompt\.placeholder\s*=\s*([^;]+);/g)];
+  assert.ok(assignments.length > 0);
+  for (const assignment of assignments) assert.equal(assignment[1], '"Send a message"');
+});
+
 test("store: memory and preferences reach the model as a system prompt", () => {
   const source = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
   const build = /function buildSystemPrompt\(\)\s*\{([\s\S]*?)\n\}/.exec(source);

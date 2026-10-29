@@ -2415,7 +2415,7 @@ async function refreshStatus() {
     $("chat-tools-settings").addEventListener("click", () => $("agents-btn").click());
 
     state.modelReady = Boolean(data.ready);
-    if (data.alias) ui.prompt.placeholder = `Message ${data.alias}`;
+    ui.prompt.placeholder = "Send a message";
 
     if (data.ready) {
       setModelState("ready", data.alias || data.model);

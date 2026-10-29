@@ -488,6 +488,7 @@
       if (run.nextRunAt) card.append(node("div", "agent-muted", `Next run: ${formatTimestamp(run.nextRunAt)}`));
       card.append(window.HorizonActivity.planView(run));
       if (run.result) card.append(node("pre", "agent-run-text", typeof run.result === "string" ? run.result : JSON.stringify(run.result, null, 2)));
+      if (run.failure?.stage) card.append(node("div", "agent-muted", `Failure stage: ${run.failure.stage}`));
       if (run.error) card.append(node("pre", "agent-run-text is-error", typeof run.error === "string" ? run.error : JSON.stringify(run.error, null, 2)));
       if (Array.isArray(run.events) && run.events.length) {
         const details = node("details", "agent-events");
@@ -526,7 +527,7 @@
     if (!form || !state.settings) return;
     form.replaceChildren();
     const settings = state.settings;
-    form.append(node("div", "agent-section-head", "Execution and tool access"));
+    form.append(node("div", "agent-section-head", "Horizon Native execution and tool access"));
     const executionEnabled = checkbox("Enable agent execution", settings.enabled, value => { settings.enabled = value; },
       "Master switch. Stop all cancels current runs and turns this off.");
     executionEnabled.querySelector("input").name = "executionEnabled";

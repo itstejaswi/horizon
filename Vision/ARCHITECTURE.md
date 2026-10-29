@@ -12,7 +12,7 @@ flowchart TD
     Native -->|Yes| Plan["Validate sequential plan, execute and check"]
     Loop <--> Queue["Shared local inference queue"]
     Plan <--> Queue
-    Queue <--> Foundry["Foundry Local selected model"]
+    Queue <--> Provider["Selected local runtime: Ollama or Foundry Local"]
     Fixed --> Gate["Horizon tool grants and exact-call approvals"]
     Loop --> Gate
     Plan --> Gate
@@ -23,7 +23,21 @@ flowchart TD
     Results --> UI["Reply, plan progress and evidence"]
 ```
 
-The native decision loop can choose another action after each tool result.
+The Horizon Native decision loop (`src/native-runtime.js`) can choose another
+action after each tool result. It supports structured JSON actions and
+OpenAI-compatible function tool calls through the selected local provider.
+Before requesting approval or executing a model decision, it validates tool
+availability, argument schemas and the entire native tool-call batch.
+One format/schema correction is permitted per run; this does not consume the
+tool budget or remove the final-answer decision. Unknown or unavailable tools,
+exhausted budgets, inference errors and failed execution are not retried.
+An uncertain side effect is never automatically replayed.
+
+Runs retain a failure stage (inference, model response, validation, permissions,
+budget, context or execution), and the UI displays it with the original error.
+Model-loop completion records that independent outcome checks were not
+configured; it is not evidence that the whole task was verified.
+
 Experimental planned mode instead validates a straight-line plan, resolves
 references to earlier structured results, executes it and evaluates checks.
 It does not branch or replan after execution begins.
