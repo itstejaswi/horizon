@@ -515,7 +515,7 @@ Or for one run: `.\scripts\Start-Horizon.ps1 -Provider ollama`, `--provider olla
 
 In Settings, the runtime section has a box to pull any model by name. On a CPU-only machine with 8 GB of RAM, use 1B to 4B models. Small models can be unreliable at the tool-call JSON that agents need.
 
-Limits: dictation and the Setup, Optimize and Test scripts are Foundry-only. OpenClaw is unaffected, since it uses whichever runtime Horizon is using.
+Limits: dictation and the Setup, Optimize and Test scripts are Foundry-only. Horizon's native agent loop and optional task planning use whichever model runtime is selected. The proposed OpenClaw path remains disconnected and is not included in this branch.
 
 ## Using a different model
 
