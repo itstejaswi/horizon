@@ -61,8 +61,8 @@ const descriptions = {
   file_search: "Search bounded text files recursively under an approved root.",
   file_write: "Create a bounded UTF-8 text file under an approved root using path and content only. To overwrite an existing file, also provide overwrite=true and its current SHA-256 from file_read.",
   command_run: "Run one preconfigured command by id; its executable, arguments and working directory cannot be supplied by the model.",
-  browser_open: "Open a public HTTPS page in an isolated ephemeral browser. Public network access is routed through an IP-validating proxy; private/internal and non-HTTPS requests are blocked.",
-  browser_snapshot: "Return bounded visible text from the current browser page.",
+  browser_open: "Open a public HTTPS page in an isolated ephemeral browser and return its title plus the start of its main text as excerpt. Public network access is routed through an IP-validating proxy; private/internal and non-HTTPS requests are blocked.",
+  browser_snapshot: "Return up to 20000 characters of visible text from the current browser page. Use it when the browser_open excerpt does not contain what you need.",
   browser_click: "Click the first element matching a CSS selector on the current page.",
   browser_fill: "Fill a form field matching a CSS selector on the current page.",
   browser_close: "Close and discard the current isolated browser session.",
@@ -722,7 +722,26 @@ async function browserOpen(args, signal) {
   }
   const run = await ensureBrowser(currentBrowserRun(signal));
   await run.page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 20_000 });
-  return pageState(run.page);
+  return { ...(await pageState(run.page)), ...(await pageExcerpt(run.page)) };
+}
+
+// Small models often answer straight after opening a page instead of calling
+// browser_snapshot, and then invent the facts. Returning the start of the
+// main content with the open puts real page text in front of them. It is kept
+// short because small models run with a few thousand tokens of context.
+const OPEN_EXCERPT_CHARS = 3000;
+
+async function pageExcerpt(page) {
+  try {
+    return await page.evaluate(maxChars => {
+      const root = document.querySelector("main, [role=main]") || document.body;
+      const text = String(root?.innerText || "").replace(/[ \t ]+/g, " ").replace(/\s*\n\s*/g, "\n").trim();
+      return { excerpt: text.slice(0, maxChars), excerptTruncated: text.length > maxChars };
+    }, OPEN_EXCERPT_CHARS);
+  } catch {
+    // A page that cannot be read still opened; browser_snapshot can retry.
+    return { excerpt: "", excerptTruncated: false };
+  }
 }
 
 async function pageState(page) {

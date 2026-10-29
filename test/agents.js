@@ -516,3 +516,23 @@ test("replies are attributed to OpenClaw only when it orchestrates conversation 
   service.saveSettings({ ...settings, chat: { ...settings.chat, enabled: false } });
   assert.equal(service.orchestrator(), "Horizon", "with conversation tools off, chat goes straight to the model");
 });
+
+test("only unmistakable small talk skips the tool loop", () => {
+  const { isSmallTalk } = require("../src/agent-context");
+  for (const text of ["Hi", "hi!", "Hello there", "thanks a lot", "Thank you 🙂", "ok", "Good morning!", "bye"]) {
+    assert.equal(isSmallTalk(text), true, `small talk: ${text}`);
+  }
+  for (const text of ["hi, open google.com", "Hi there, can you read notes.txt?", "open https://example.com", "what is the price?", "ok do it", "thanks, now delete it", "", "hey ".repeat(20)]) {
+    assert.equal(isSmallTalk(text), false, `needs tools: ${text}`);
+  }
+});
+
+test("tool runs see the system instruction and only the most recent turns", () => {
+  const { recentHistory, TOOL_HISTORY_TURNS } = require("../src/agent-context");
+  const turns = Array.from({ length: 20 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `m${i}` }));
+  const kept = recentHistory([{ role: "system", content: "rules" }, ...turns]);
+  assert.equal(kept[0].content, "rules");
+  assert.equal(kept.length, TOOL_HISTORY_TURNS + 1);
+  assert.deepEqual(kept.slice(1).map(m => m.content), turns.slice(-TOOL_HISTORY_TURNS).map(m => m.content));
+  assert.equal(recentHistory([{ role: "user", content: "only" }]).length, 1);
+});

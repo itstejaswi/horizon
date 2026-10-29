@@ -22,6 +22,7 @@ const { foundryIcon } = require("./brand");
 const { AgentService } = require("./agents");
 const agentTools = require("./agent-tools");
 const { createOpenClawOrchestrator, runtimeStatus: openclawRuntimeStatus } = require("./openclaw-runtime");
+const { isSmallTalk, recentHistory } = require("./agent-context");
 const { InferenceQueue } = require("./inference-queue");
 const { acquireAgentOwner } = require("./agent-owner");
 
@@ -668,7 +669,8 @@ async function handleChat(req, res) {
     return sendJson(res, 400, { error: "A user message is required." });
   }
 
-  if (agents.conversationEnabled()) {
+  // Small talk skips the tool loop and streams a plain reply in seconds.
+  if (agents.conversationEnabled() && !isSmallTalk(clean[clean.length - 1].content)) {
     if (!agentRequestAllowed(req) || req.headers["x-horizon-agent-token"] !== agents.csrfToken) {
       return sendJson(res, 403, { error: "Reload Horizon to authorise conversation tools on this local page." });
     }
@@ -676,8 +678,9 @@ async function handleChat(req, res) {
       return sendJson(res, 415, { error: "Tool-enabled conversations accept application/json only." });
     }
     try {
-      const run = agents.chat(clean, input.clientRunId);
-      return sendJson(res, 200, { run, truncated, model: state.modelId || config.model.alias });
+      const history = recentHistory(clean);
+      const run = agents.chat(history, input.clientRunId);
+      return sendJson(res, 200, { run, truncated: truncated || history.length < clean.length, model: state.modelId || config.model.alias });
     } catch (error) {
       return sendJson(res, 400, { error: error.message });
     }
