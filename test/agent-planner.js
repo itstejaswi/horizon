@@ -60,8 +60,9 @@ function fixture(t, options = {}) {
     });
     return service.run(agent.id);
   };
-  const finished = run => until(() => {
+  const finished = (run, { approve = false } = {}) => until(() => {
     const current = service.getRun(run.id);
+    if (approve && current.approval) service.approve(run.id, current.approval.id, true);
     return terminal.has(current.status) && current;
   });
   return { service, settings, start, finished, calls, requests, directory };
@@ -132,7 +133,7 @@ test("write verification does not trust a tool's reported sha256 instead of read
     responses: [{ steps: [step("file_write", { path: "note.txt", content: "expected" })] }],
     execute: async () => ({ content: "wrong", sha256: "a".repeat(64) })
   });
-  const run = await finished(start({ unattendedTools: ["file_write"] }));
+  const run = await finished(start({ unattendedTools: ["file_write"] }), { approve: true });
   assert.equal(run.status, "failed");
   assert.match(run.error, /readback does not match/);
   assert.equal(calls.filter(call => call.name === "file_write").length, 1);
@@ -195,7 +196,7 @@ test("nontransient errors and uncertain side effects are never retried", async t
       responses: [{ steps: [step(tool, args)] }],
       execute: async () => { throw Object.assign(new Error("operation failed"), { code }); }
     });
-    const run = await finished(start({ unattendedTools: ["command_run"] }));
+    const run = await finished(start({ unattendedTools: ["command_run"] }), { approve: true });
     assert.equal(run.status, "failed");
     assert.equal(calls.length, 1);
   }
@@ -224,7 +225,7 @@ test("prior result references resolve exact overwrite hashes without expression 
     execute: tools.execute
   });
   fs.writeFileSync(path.join(directory, "note.txt"), "original");
-  const run = await finished(start({ unattendedTools: ["file_write"], maxSteps: 3 }));
+  const run = await finished(start({ unattendedTools: ["file_write"], maxSteps: 3 }), { approve: true });
   assert.equal(run.status, "completed");
   assert.equal(fs.readFileSync(path.join(directory, "note.txt"), "utf8"), "updated");
   assert.equal(run.verification.status, "partial");
@@ -254,16 +255,18 @@ test("cancellation during approval never starts a readback or later action", asy
   assert.equal(calls.length, 0);
 });
 
-test("planning applies to normal conversations without saved-agent unattended grants", async t => {
+test("saved-agent planning never forces ordinary conversations through a JSON plan", async t => {
   const { service, finished, calls, requests } = fixture(t, {
-    responses: [{ steps: [step("file_write", { path: "note.txt", content: "note" })] }, { final: "Saved" }]
+    responses: ["How can I help?"]
   });
-  const queued = service.chat([{ role: "system", content: "Be concise." }, { role: "user", content: "Save note." }]);
-  const approval = await until(() => service.getRun(queued.id).approval);
+  const queued = service.chat([{ role: "system", content: "Be concise." }, { role: "user", content: "Hello." }]);
   assert.equal(calls.length, 0);
-  service.approve(queued.id, approval.id, true);
   const run = await finished(queued);
   assert.equal(run.status, "completed");
+  assert.equal(run.result, "How can I help?");
+  assert.equal(run.plan, undefined);
+  assert.equal(requests.length, 1);
+  assert.ok(requests[0].tools.length);
   assert.match(requests[0].messages[0].content, /Be concise/);
   assert.equal(service.data.agents.length, 0);
 });
@@ -385,7 +388,7 @@ test("full readback data is checked even when the displayed tool output is trunc
     responses: [{ steps: [step("file_write", { path: "large.txt", content })] }, { final: "Saved" }],
     execute: tools.execute
   });
-  const run = await finished(start({ unattendedTools: ["file_write"] }));
+  const run = await finished(start({ unattendedTools: ["file_write"] }), { approve: true });
   assert.equal(run.status, "completed");
   assert.equal(run.verification.status, "passed");
   assert.equal(calls.length, 2);

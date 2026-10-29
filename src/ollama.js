@@ -68,6 +68,11 @@ function binaryCandidates(configured) {
 function createOllama(options = {}) {
   const client = createClient({ label: "Ollama", reachName: "Ollama" });
   const configuredBase = String(options.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, "").replace(/\/v1$/, "");
+  const parsedBase = client.assertLoopback(configuredBase);
+  if (!["http:", "https:"].includes(parsedBase.protocol) || parsedBase.username || parsedBase.password ||
+      parsedBase.search || parsedBase.hash || parsedBase.pathname !== "/") {
+    throw new Error("Ollama requires a loopback HTTP(S) host URL without credentials, path, query or fragment.");
+  }
   const keepAlive = options.keepAlive || "30m";
   const configuredBinary = options.binary || null;
   let endpoint = configuredBase;
@@ -408,10 +413,9 @@ function createOllama(options = {}) {
     label: "Ollama",
     docsUrl: "https://ollama.com/download",
     loadsOnDemand: true,
-    supportsDictation: false,
     restartHint: "ollama serve",
     loadHint: alias => `ollama run ${alias}`,
-    defaultAlias: "llama3.2:3b",
+    defaultAlias: "qwen3:1.7b",
     isSafeAlias,
     variantName: id => String(id || ""),
     mergeLoadState: (catalogueModels, cacheModels) => {
@@ -420,6 +424,7 @@ function createOllama(options = {}) {
     },
     isInstalled,
     serverStatus,
+    ownsService: () => Boolean(child && child.exitCode === null),
     startServer,
     stopServer,
     restartServer,
@@ -443,7 +448,19 @@ function createOllama(options = {}) {
     resolveModelId,
     chatCompletion: client.chatCompletion,
     chatCompletionStream: client.chatCompletionStream,
-    agentCompletion: client.agentCompletion,
+    agentCompletion(baseUrl, body, signal) {
+      // Some Ollama chat templates only honour the initial system message.
+      // Keep graph corrections/current observations in that authoritative
+      // message rather than relying on mid-conversation system roles.
+      const system = body.messages.filter(message => message.role === "system").map(message => message.content).join("\n\n");
+      const messages = body.messages.filter(message => message.role !== "system").map(message => ({ ...message }));
+      if (system) messages.unshift({ role: "system", content: system });
+      if (/^(?:[^/]+\/)?qwen3(?:[.:/-]|$)/i.test(body.model || "")) {
+        const latest = messages.findLastIndex(message => message.role === "user");
+        if (latest >= 0) messages[latest].content += "\n/no_think";
+      }
+      return client.agentCompletion(baseUrl, { ...body, messages }, signal);
+    },
     parseServerSentEvents
   };
 }

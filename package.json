@@ -2,24 +2,27 @@
     "name": "horizon",
     "version": "1.0.0",
     "private": true,
-    "description": "Your models, running on your machine. Local web chat, dictation and model management for Microsoft Foundry Local or Ollama.",
+    "description": "Your models, running on your machine. Horizon-owned local orchestration, chat and model management with Ollama.",
     "type": "commonjs",
     "main": "src/server.js",
     "scripts": {
         "start": "node src/server.js",
-        "test": "node --test test/regression.js test/agents.js test/agent-planner.js test/native-runtime.js test/agent-tools.js test/agent-setup.js test/agent-api.js test/inference-queue.js test/speech.js test/chat-tools.js test/openclaw-broker.js test/ollama.js",
+        "test": "node --test test/regression.js test/agents.js test/agent-planner.js test/native-runtime.js test/agent-tools.js test/browser-lifecycle.js test/agent-setup.js test/agent-api.js test/inference-queue.js test/speech.js test/chat-tools.js test/openclaw-broker.js test/ollama.js",
         "build": "node tools/build-html.js",
-        "check": "node --check src/server.js && node --check src/config.js && node --check src/foundry.js && node --check src/openai-client.js && node --check src/ollama.js && node --check src/providers.js && node --check src/native-runtime.js && node --check src/net.js && node --check src/runtime.js && node --check src/desktop.js && node --check src/backup.js && node --check src/reader.js && node --check src/dictation.js && node --check public/app.js && node --check public/store.js && node --check src/agents.js && node --check src/agent-planner.js && node --check src/agent-context.js && node --check src/openclaw-broker.js && node --check src/agent-tools.js && node --check src/agent-mcp.js && node --check src/inference-queue.js && node --check src/agent-owner.js && node --check public/agents.js && node --check public/chat-tools.js && node --check public/speech.js && node --check public/activity.js",
+        "check": "node --check src/server.js && node --check src/config.js && node --check src/openai-client.js && node --check src/ollama.js && node --check src/providers.js && node --check src/native-runtime.js && node --check src/net.js && node --check src/runtime.js && node --check src/desktop.js && node --check src/backup.js && node --check src/reader.js && node --check public/app.js && node --check public/store.js && node --check src/agents.js && node --check src/agent-planner.js && node --check src/agent-context.js && node --check src/openclaw-broker.js && node --check src/agent-tools.js && node --check src/agent-mcp.js && node --check src/inference-queue.js && node --check src/agent-owner.js && node --check public/agents.js && node --check public/chat-tools.js && node --check public/speech.js && node --check public/activity.js",
         "postinstall": "node tools/setup-agent-runtime.js",
         "setup:browser": "node tools/setup-agent-runtime.js",
         "test:local-agent": "node tools/test-local-agent.js",
+        "test:conversation": "node tools/validate-conversation.js",
         "icons": "node tools/build-icons-png.js"
     },
     "engines": {
-        "node": ">=18.0.0"
+        "node": ">=20.0.0"
     },
     "dependencies": {
-        "node-pty": "^1.0.0",
+        "@langchain/core": "1.2.20",
+        "@langchain/langgraph": "1.5.2",
+        "zod": "4.6.6",
         "playwright": "1.55.1"
     },
     "license": "AGPL-3.0-or-later",

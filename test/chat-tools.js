@@ -52,6 +52,22 @@ test("ordinary chat follows a tool run and renders its activity without HTML inj
   assert.equal(h.requests[1].url, `/api/agents/run?id=${control.id}`);
 });
 
+test("interactive handoff returns the composer while leaving a visible same-conversation resume point", async () => {
+  const h = harness(url => url === "/api/chat-tools" ? { enabled: true, csrfToken: "token" } : {});
+  const control = await h.api.prepare(new AbortController().signal);
+  const parent = new Element("div");
+  const statuses = [];
+  const result = await control.follow({
+    status: "awaiting_user", result: "The viewport is ready.",
+    handoff: { message: "The viewport is ready.", resume: "next-message-in-same-conversation" },
+    events: [{ type: "handoff", message: "Waiting for you." }]
+  }, parent, new AbortController().signal, label => statuses.push(label));
+  assert.equal(result.reply, "The viewport is ready.");
+  assert.equal(control.pending, false);
+  assert.deepEqual(statuses, ["Waiting for you"]);
+  assert.equal(parent.children[0].children[0].textContent, "Activity · Waiting for you");
+});
+
 test("approval is explicit and sent once with the exact approval and run IDs", async () => {
   const h = harness(url => url === "/api/chat-tools" ? { enabled: true, csrfToken: "token" }
     : url === "/api/agents/approve" ? { approved: true }
@@ -64,12 +80,28 @@ test("approval is explicit and sent once with the exact approval and run IDs", a
   }, parent, new AbortController().signal, () => {});
   assert.equal(h.requests.length, 1);
   const approve = parent.querySelectorAll("button").find(button => button.textContent === "Approve");
+  assert.equal(parent.children[0].open, false);
+  assert.equal(parent.children[1].className, "agent-approval");
+  assert.equal(parent.children[1].hidden, false);
   await Promise.all([approve.listeners.click(), approve.listeners.click()]);
   assert.equal(h.requests.filter(request => request.url === "/api/agents/approve").length, 1);
   const approval = h.requests.find(request => request.url === "/api/agents/approve");
   assert.deepEqual(JSON.parse(approval.options.body), { id: control.id, approvalId: "exact-preview", approve: true });
   assert.equal(approval.options.headers["X-Horizon-Agent-Token"], "token");
   assert.equal((await following).reply, "Written");
+});
+
+test("activity stays collapsed unless the reader opens it and polling preserves that choice", async () => {
+  const parent = new Element("div");
+  const h = harness(url => {
+    if (url === "/api/chat-tools") return { enabled: true, csrfToken: "token" };
+    assert.equal(parent.children[0].open, false);
+    parent.children[0].open = true;
+    return { status: "completed", result: "Done", events: [] };
+  });
+  const control = await h.api.prepare(new AbortController().signal);
+  await control.follow({ status: "running", events: [] }, parent, new AbortController().signal, () => {});
+  assert.equal(parent.children[0].open, true);
 });
 
 test("Stop cancels active conversation work even before the initial chat response", async () => {
@@ -128,6 +160,18 @@ test("activity reflects actual model, tool and approval events rather than guess
   }
   assert.equal(activity.describe({ status: "running", events: [{ type: "model" }] }).phase, "thinking");
   assert.equal(activity.describe({ status: "awaiting_approval", events: [{ type: "tool", tool: "file_write" }] }).phase, "approval");
+  assert.deepEqual(activity.describe({
+    status: "awaiting_user", handoff: { message: "Ready." }, events: [{ type: "handoff" }]
+  }), { phase: "handoff", label: "Waiting for you" });
+  assert.deepEqual(activity.describe({
+    status: "awaiting_user", handoff: { resumeRequestedAt: 123 }
+  }), { phase: "queued", label: "Continuation queued" });
+  assert.deepEqual(activity.describe({
+    status: "awaiting_user", handoff: { resumedAt: 123 }
+  }), { phase: "completed", label: "Continued" });
+  assert.equal(activity.describe({
+    status: "completed", handoff: { message: "Ready.", resumedAt: 123 }, events: [{ type: "handoff" }]
+  }).phase, "completed");
   for (const status of ["queued", "completed", "failed", "cancelled", "interrupted", "skipped"]) {
     assert.equal(activity.describe({ status, events: [{ type: "tool", tool: "file_write" }] }).phase, status);
   }
@@ -226,7 +270,7 @@ test("inline plans refresh even without new events and retain terminal evidence"
   assert.match(text, /Fresh read matched/);
   assert.match(text, /Verification: configured checks passed/);
   assert.doesNotMatch(text, /Outcome check pending/);
-  assert.equal(parent.children[0].children[3].children.length, 1);
+  assert.equal(parent.children[0].children[2].children.length, 1);
 });
 
 test("planning and verification phases follow actual events without overriding terminal or approval states", () => {

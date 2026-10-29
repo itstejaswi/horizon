@@ -2,7 +2,7 @@
   "use strict";
 
   const active = new Set();
-  const terminal = new Set(["completed", "failed", "cancelled", "interrupted", "skipped"]);
+  const terminal = new Set(["completed", "awaiting_user", "failed", "cancelled", "interrupted", "skipped"]);
   const node = (tag, className, value) => {
     const element = document.createElement(tag);
     if (className) element.className = className;
@@ -46,20 +46,21 @@
         control.pending = true;
         active.add(control);
         const activity = node("details", "thinking chat-tool-activity");
-        activity.open = true;
+        activity.open = false;
         const heading = node("summary", "", "Tool activity");
         const log = node("div", "chat-tool-log");
         const plan = node("div", "chat-tool-plan");
         const approval = node("section", "agent-approval");
-        activity.append(heading, log, approval, plan);
-        parent.append(activity);
+        approval.hidden = true;
+        activity.append(heading, log, plan);
+        parent.append(activity, approval);
         let signature = "";
         let planSignature = "";
         let approvalId = null;
         let approving = false;
         const paint = current => {
-          heading.textContent = `Tool activity \u00b7 ${current.status.replaceAll("_", " ")}`;
           const progress = window.HorizonActivity.describe(current);
+          heading.textContent = `Activity \u00b7 ${progress.label}`;
           onStatus(progress.label, progress.phase);
           const nextPlan = JSON.stringify([current.plan, current.verification]);
           if (planSignature !== nextPlan) {
@@ -121,11 +122,13 @@
             paint(run);
             if (terminal.has(run.status)) {
               control.finish();
+              if (run.status === "awaiting_user" && run.handoff) {
+                return { reply: run.result, agentRunId: id };
+              }
               if (run.status !== "completed") {
                 const stage = run.failure?.stage ? `Horizon Native (${run.failure.stage}): ` : "";
                 throw new Error(stage + (run.error || `Conversation ${run.status}.`));
               }
-              activity.open = false;
               return { reply: run.result, agentRunId: id };
             }
             await delay(signal);
@@ -136,7 +139,7 @@
           if (control.pending) {
             try {
               await control.cancel();
-              heading.textContent = "Tool activity \u00b7 cancellation requested";
+              heading.textContent = "Activity \u00b7 cancellation requested";
             }
             catch (error) { onStatus(`Could not confirm tool cancellation: ${error.message}`); }
           }

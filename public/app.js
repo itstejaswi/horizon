@@ -17,17 +17,13 @@ const ui = {
   urlWarning: $("url-warning"), urlWarningText: $("url-warning-text"),
   attachBtn: $("attach-btn"), attachInput: $("attach-input"),
   pickerLabel: $("picker-label"), pickerDot: $("picker-dot"),
-  dictateBtn: $("dictate-btn"), dictateIcon: $("dictate-icon"),
-  dictationBar: $("dictation-bar"), dictationStatus: $("dictation-status"),
-  dictationTimer: $("dictation-timer"), dictationStop: $("dictation-stop"),
   airgapBadge: $("airgap-badge"), airgapText: $("airgap-text"), airgapGlyph: $("airgap-glyph")
 };
 
 const state = {
   chat: null,
   defaults: null,
-  // Replaced by the real model name as soon as status loads. The reply is the
-  // model's work, so it is never labelled with the product's name.
+  // Model identity is retained in details; assistant turns use the Horizon name.
   assistantLabel: "Model",
   busy: false,
   controller: null,
@@ -50,10 +46,6 @@ const state = {
   // the amber has faded. A signal nobody saw is not a signal.
   lastReachedOut: null,
   toolPrivacy: null,
-  // Live dictation. The transcript arrives from the server as it is spoken;
-  // `base` is whatever was already typed, so speech is added to it rather than
-  // replacing the user's own text.
-  dictation: { available: false, enabled: false, recording: false, stream: null, base: "", startedAt: 0, timer: null, settled: false, modelState: "idle" }
 };
 
 const LOG_CAP = 20;
@@ -338,11 +330,9 @@ for (const button of document.querySelectorAll("[data-theme-set]")) {
 // browser's own signal. Actively probing the internet to prove there is no
 // internet would defeat the purpose.
 //
-// While a page is being fetched it becomes an activity light, in the way the
-// operating system shows one while the camera or microphone is live. That is
-// the state worth surfacing: "runs locally" is a claim anyone can verify for
-// themselves, but a fetch is a real event, happening now, and it should be
-// visible while it happens rather than only afterwards in the Traffic panel.
+// While a page is being fetched it becomes an activity light. "Runs locally"
+// is a claim anyone can verify, but a fetch is a real event happening now and
+// should be visible rather than only afterwards in the Traffic panel.
 let reachOutTimer = null;
 
 function refreshAirGap() {
@@ -382,7 +372,7 @@ function refreshAirGap() {
 // worth very little.
 function openTrafficLog() {
   setMode("settings");
-  settingsSection = "foundry";
+  settingsSection = "ollama";
   renderSettings();
   const log = document.getElementById("wire-log") || $("settings-body");
   if (log && log.scrollIntoView) log.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -620,12 +610,10 @@ function createTurn(role, label) {
 
   const turn = el("div", `turn ${role}`);
   const avatar = el("div", "avatar");
-  // The model is the author of the reply, not Horizon, so the avatar is a
-  // neutral model glyph rather than the product's own mark.
   avatar.append(icon(role === "user" ? "i-person" : "i-model-on"));
 
   const main = el("div", "turn-main");
-  const meta = el("div", "turn-meta", label);
+  const meta = el("div", "turn-meta", role === "assistant" ? "Horizon" : label);
   const bubble = el("div", "bubble");
   main.append(meta, bubble);
 
@@ -762,7 +750,7 @@ function persistTurns() {
   if (!state.chat) return;
 
   // The first user message makes a far better title than "New chat".
-  const patch = { turns: state.chat.turns };
+  const patch = { turns: state.chat.turns, toolApprovals: state.chat.toolApprovals };
   if (state.chat.title === "New chat") {
     const first = state.chat.turns.find(turn => turn.role === "user");
     // "typed" is what the person actually wrote. Without it the title comes
@@ -1141,11 +1129,8 @@ function renderLibraryDrawer(body) {
 
 /* --- about and privacy ---------------------------------------------------- */
 
-// Three layers run on this machine and they are not the same thing. Horizon is
-// ours and we can speak for it absolutely. Foundry Local is Microsoft's. The
-// model is a third party's. Blurring them into one reassuring claim would be
-// the dishonest thing to do, so this separates them and says what is known,
-// what is not, and where to read further.
+// Horizon, Ollama and the selected model are separate parts of the local
+// setup. This describes what each does without conflating their guarantees.
 function renderAbout() {
   const body = $("about-body");
   body.textContent = "";
@@ -1154,7 +1139,7 @@ function renderAbout() {
   body.append(pane);
 
   pane.append(el("h2", "about-lede",
-    "Horizon is a control panel for models running on your own computer."));
+    "Horizon orchestrates models and tools on your own computer."));
   pane.append(el("p", "about-sub",
     "Three separate pieces are involved, and they make different promises. Here is what each one does, what we can promise, and what we cannot."));
 
@@ -1184,23 +1169,19 @@ function renderAbout() {
 
   layer("Horizon", "good", [
     "This independent application has no telemetry, analytics or author-operated cloud service.",
-    "Model inference uses Foundry Local on this machine. Optional link reading and agent tools can access the network; their destinations depend on what you enable.",
+    `Model inference uses ${runtimeLabel()} on this machine. Optional link reading and agent tools can access the network; their destinations depend on what you enable.`,
     "Chats, prompts and memory stay in this browser unless you enable a disk copy. Agent definitions, permissions, schedules and run history are stored separately on disk."
   ]);
 
-  layer("Foundry Local", null, [
-    "Microsoft's software, which actually runs the models. Horizon starts and stops it, but does not control what it does.",
-    "It reaches the internet to download models and to check its catalogue. Whether it reports anything else is governed by Microsoft's terms, not ours.",
-    "We have observed no outbound connection while it sits idle or answers a message, but we cannot prove the absence of telemetry and do not claim to."
-  ], {
-    text: "Foundry Local privacy and terms",
-    href: "https://learn.microsoft.com/en-us/azure/foundry-local/"
-  });
+  layer("Ollama", null, [
+    "Ollama runs the selected model through a loopback endpoint. Horizon does not control the runtime's own policies.",
+    "Downloading models accesses the network. Local inference does not require cloud inference or an API key."
+  ], { text: "Ollama documentation", href: "https://docs.ollama.com/" });
 
   layer("The model", null, [
     "A third party's work, running locally. It has no network access of its own; Horizon may execute permitted tools on its behalf in Agent mode.",
     "It answers from training, your messages and supplied tool results. Without fetched page content it may guess from an address and state that guess as fact.",
-    "Each model carries its own licence, shown in the model catalogue under Settings."
+    "Each model carries its own licence and terms; check them before use."
   ]);
 
   const covenant = el("div", "help-card is-wide");
@@ -1221,38 +1202,14 @@ function renderAbout() {
   covenant.append(risks);
   grid.append(covenant);
 
-  // Dictation deserves its own note here rather than a line in a settings
-  // panel. It opens a microphone in a way the browser cannot show you, and
-  // somebody reading this page to decide whether to trust Horizon should be
-  // told that plainly rather than discover it.
-  const speech = el("div", "help-card is-wide");
-  speech.append(el("span", "help-card-title", "If you speak to it instead of typing"));
-  speech.append(el("p", "help-line",
-    "Dictation is optional and off until you switch it on. When it runs, this is what happens:"));
-
-  const speechNotes = el("ul", "help-list");
-  for (const note of [
-    "Your voice stays on this computer. It goes to a speech model running here, and is never sent anywhere.",
-    "The recording does not happen in this browser. Foundry Local opens the microphone itself, so there is no permission prompt and no recording indicator in the tab, and Windows records the use against Foundry Local rather than your browser.",
-    "Horizon shows a red banner for as long as the microphone is open. That banner is the only signal this page can give you, which is why it is hard to miss.",
-    "Foundry listens to whatever Windows has set as the default input device. Horizon cannot choose it for you, and does not offer a list it could not honour.",
-    "What you say is written into the message box for you to read and correct. Nothing is sent until you send it."
-  ]) {
-    speechNotes.append(el("li", null, note));
-  }
-  speech.append(speechNotes);
-  grid.append(speech);
-
   /* --- who made what ---------------------------------------------------- */
 
-  // Named plainly rather than in fine print: Horizon is not a Microsoft
-  // product, and Foundry is not Tejaswi's. Saying so here removes any doubt
-  // about what this is and who owns which name.
+  // Keep the project and the runtime attribution distinct.
   const credits = el("div", "about-credits");
 
   const mine = el("div", "about-credit");
   const mineHead = el("div", "about-credit-head");
-  mineHead.append(brandMark("horizon"), el("h3", "about-credit-title", "About Horizon"));
+  mineHead.append(horizonMark(), el("h3", "about-credit-title", "About Horizon"));
   mine.append(mineHead);
   mine.append(el("p", "about-credit-body",
     "Horizon is an independent, local-first personal project for local AI models, optional tools and automations. It requires no Horizon account or paid inference API. External capabilities are off by default and have separate permissions. It is not a Microsoft product."));
@@ -1279,18 +1236,19 @@ function renderAbout() {
   const theirs = el("div", "about-credit");
   const theirsHead = el("div", "about-credit-head");
   const theirsTitle = el("h3", "about-credit-title");
-  const theirsLink = el("a", "about-credit-link");
-  theirsLink.href = "https://learn.microsoft.com/en-us/azure/foundry-local/";
+  const theirsLink = el("a", "about-credit-link", "Ollama");
+  theirsLink.href = "https://docs.ollama.com/";
   theirsLink.target = "_blank";
   theirsLink.rel = "noopener noreferrer";
-  theirsLink.textContent = "Microsoft AI Foundry";
   theirsTitle.append(theirsLink);
-  theirsHead.append(brandMark("foundry"), theirsTitle);
+  const ollamaMark = el("span", "about-brand-mark");
+  ollamaMark.append(icon("i-model"));
+  theirsHead.append(ollamaMark, theirsTitle);
   theirs.append(theirsHead);
   theirs.append(el("p", "about-credit-body",
-    "Foundry Local is Microsoft's runtime for running AI models on your own hardware. It downloads models, manages the cache and serves them over a local endpoint. Horizon talks to that endpoint but is not part of it, and does not modify it."));
+    "Ollama provides the local runtime for AI models. Horizon connects to the Ollama service and helps manage local models; the two projects are independent."));
   theirs.append(el("p", "about-credit-note",
-    "Microsoft, Azure, Foundry and Foundry Local are trademarks of the Microsoft group of companies, used here only to name the software Horizon connects to. Horizon is not a Microsoft product and is not affiliated with or endorsed by Microsoft. Where the Foundry icon is shown, it is read from the copy installed on this computer and remains Microsoft's; Horizon distributes no Microsoft artwork of its own."));
+    "Ollama is named here to identify the software Horizon connects to. Horizon is an independent project and is not affiliated with Ollama."));
 
   credits.append(mine, theirs);
   pane.append(credits);
@@ -1329,78 +1287,28 @@ function renderAbout() {
   }
 
   pane.append(el("p", "about-foot",
-    "Horizon \u00B7 an independent front end for local models \u00B7 designed by Tejaswi"));
+    "Horizon \u00B7 an independent local orchestrator for models, tools and workflows \u00B7 designed by Tejaswi"));
 }
 
-// Small brand lockups for the attribution block. Horizon's is its own mark.
-// Foundry's is loaded from the copy installed on this machine, so the real
-// product icon is shown without this project redistributing Microsoft's
-// artwork; if Foundry is not installed, the original crucible glyph stands in.
-// Foundry Local's own icon, read from wherever Microsoft installed it on this
-// machine and served by src/brand.js. Naming Microsoft's product but drawing
-// our own glyph for it invites the opposite of the intended reading: it looks
-// like the brand is being approximated rather than credited. So where the name
-// appears, the real mark appears with it.
-//
-// The fallback glyph is still drawn first and stays if Foundry is not
-// installed, or if the icon cannot be read. No Microsoft artwork is kept in
-// this repository; it is only ever read from the local install.
-function foundryMark(fallbackId, className) {
-  const wrap = el("span", className);
-  wrap.append(icon(fallbackId, className ? `${className}-glyph` : null));
-
-  const real = new Image();
-  real.alt = "";
-  real.className = className ? `${className}-img` : "";
-  real.addEventListener("load", () => {
-    wrap.textContent = "";
-    wrap.append(real);
-    wrap.dataset.real = "true";
-  });
-  real.src = "/api/brand/foundry";
-
-  return wrap;
-}
-
-function brandMark(which) {
+function horizonMark() {
   const wrap = el("span", "about-brand-mark");
-  wrap.dataset.brand = which;
-
-  if (which === "horizon") {
-    wrap.append(icon("i-mark-xs"));
-    return wrap;
-  }
-
-  wrap.append(icon("i-foundry"));
-
-  const real = new Image();
-  real.alt = "";
-  real.className = "about-brand-img";
-  real.addEventListener("load", () => {
-    wrap.textContent = "";
-    wrap.append(real);
-    wrap.dataset.real = "true";
-  });
-  real.src = "/api/brand/foundry";
-
+  wrap.dataset.brand = "horizon";
+  wrap.append(icon("i-mark-xs"));
   return wrap;
 }
 
 /* --- connection ----------------------------------------------------------- */
 
-/* --- foundry control ------------------------------------------------------ */
+/* --- Ollama control ------------------------------------------------------- */
 
-// Horizon acts as a front end for the Foundry service: it reports whether
-// Foundry is installed and running, and can start, stop or restart it.
-// The model runtime in use, so wording follows the provider (Foundry Local or Ollama).
 function runtimeLabel() {
-  return state.provider?.label || "Foundry Local";
+  return "Ollama";
 }
 
-async function renderFoundryCard(card) {
+async function renderOllamaCard(card) {
   let data;
   try {
-    data = await (await fetch("/api/foundry")).json();
+    data = await (await fetch("/api/ollama")).json();
   } catch {
     card.textContent = "";
     card.append(el("p", "panel-note", "The local server is not responding."));
@@ -1415,7 +1323,7 @@ async function renderFoundryCard(card) {
 
   const title = el("div", "svc-title");
   title.append(
-    el("span", null, "Foundry Local"),
+    el("span", null, runtimeLabel()),
     el("span", "svc-state", !data.installed ? "Not installed" : data.running ? "Running" : "Stopped")
   );
   head.append(dot, title);
@@ -1426,9 +1334,9 @@ async function renderFoundryCard(card) {
 
     const steps = el("ol", "setup-steps");
     for (const [text, code] of [
-      ["Install Foundry Local", "winget install Microsoft.FoundryLocal"],
+      ["Install Ollama", "winget install Ollama.Ollama"],
       ["Close and reopen this window", null],
-      ["Download a model", "foundry model download qwen2.5-1.5b"]
+      ["Download a model", "ollama pull qwen3:1.7b"]
     ]) {
       const step = el("li");
       step.append(el("span", null, text));
@@ -1437,8 +1345,8 @@ async function renderFoundryCard(card) {
     }
     card.append(steps);
 
-    const link = el("a", "doc-link", "Foundry Local documentation");
-    link.href = data.docs;
+    const link = el("a", "doc-link", `${runtimeLabel()} documentation`);
+    link.href = "https://docs.ollama.com/";
     link.target = "_blank";
     link.rel = "noreferrer noopener";
     link.append(icon("i-up", "doc-link-icon"));
@@ -1465,12 +1373,12 @@ async function renderFoundryCard(card) {
     button.addEventListener("click", async () => {
       for (const b of actions.querySelectorAll("button")) b.disabled = true;
       button.textContent = busyLabel;
-      setNote(`${busyLabel} Foundry Local...`);
+      setNote(`${busyLabel} ${runtimeLabel()}...`);
       try {
         const response = await fetch(path, { method: "POST" });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "That did not work.");
-        setNote(`Foundry Local ${label === "Stop" ? "stopped" : "is running"}.`);
+        setNote(`${runtimeLabel()} ${label === "Stop" ? "stopped" : "is running"}.`);
         await Promise.all([refreshModels(), refreshStatus()]);
         renderDrawer();
       } catch (error) {
@@ -1482,10 +1390,10 @@ async function renderFoundryCard(card) {
   };
 
   if (data.running) {
-    await act("Restart", "/api/foundry/restart", "Restarting");
-    await act("Stop", "/api/foundry/stop", "Stopping");
+    await act("Restart", "/api/ollama/restart", "Restarting");
+    await act("Stop", "/api/ollama/stop", "Stopping");
   } else {
-    await act("Start", "/api/foundry/start", "Starting");
+    await act("Start", "/api/ollama/start", "Starting");
   }
 
   card.append(actions);
@@ -1494,12 +1402,12 @@ async function renderFoundryCard(card) {
 async function renderConnectionDrawer(body) {
   const online = navigator.onLine;
 
-  // Foundry control comes first: when nothing is connected, this is the
+  // Ollama control comes first: when nothing is connected, this is the
   // panel that lets you do something about it.
-  const foundryCard = el("div", "card");
-  foundryCard.append(el("p", "panel-note", "Checking Foundry Local..."));
-  body.append(foundryCard);
-  renderFoundryCard(foundryCard);
+  const ollamaCard = el("div", "card");
+  ollamaCard.append(el("p", "panel-note", `Checking ${runtimeLabel()}...`));
+  body.append(ollamaCard);
+  renderOllamaCard(ollamaCard);
 
   const heading = el("h3", "panel-heading");
   heading.append(icon("i-plug", "heading-icon"), document.createTextNode("Every hop in the chain"));
@@ -1547,10 +1455,10 @@ async function renderConnectionDrawer(body) {
     el("p", "panel-note", online
       ? "Model inference uses loopback. Link reading, browser tools, configured commands and MCP servers may access the network. Traffic covers chat requests; Agents records tool calls, not every subprocess network request."
       : "Local inference and local file workflows can operate offline. Browser connectivity is only a signal, not proof that every subprocess is disconnected."),
-    el("p", "panel-note", "No telemetry, no analytics. Horizon does not control Foundry Local or the model itself.")
+    el("p", "panel-note", `No telemetry, no analytics. Horizon does not control ${runtimeLabel()} or the model itself.`)
   );
-  const link = el("a", "doc-link", "Foundry Local documentation");
-  link.href = "https://learn.microsoft.com/en-us/azure/foundry-local/";
+  const link = el("a", "doc-link", `${runtimeLabel()} documentation`);
+  link.href = "https://docs.ollama.com/";
   link.target = "_blank";
   link.rel = "noreferrer noopener";
   link.append(icon("i-up", "doc-link-icon"));
@@ -1561,12 +1469,12 @@ async function renderConnectionDrawer(body) {
 
 /* --- traffic -------------------------------------------------------------- */
 
-// Traffic moved out of the rail and into the Foundry section: it describes
+// Traffic moved out of the rail and into the Ollama section: it describes
 // what Horizon sends to the service, so it belongs beside it. Recording stays
 // off unless asked for, and nothing ever leaves this computer.
 function renderTrafficSettings(panel) {
   const card = settingsCard(panel, "Request log",
-    "What Horizon sends to Foundry and gets back. Kept in memory only, never written to disk.");
+    `What Horizon sends to ${runtimeLabel()} and gets back. Kept in memory only, never written to disk.`);
 
   const level = logLevel();
 
@@ -1637,9 +1545,6 @@ function renderTrafficSettings(panel) {
 // Settings follows the Fluent pattern: a list of sections down the left, one
 // panel of cards on the right. Only the chosen section renders, so no section
 // is ever more than a short scroll.
-// Horizon is meant to be backend-agnostic, so anything specific to Foundry
-// Local is named for it rather than hidden behind a generic "Server". If
-// another runtime is ever supported, this section is the part that changes.
 const SETTINGS_SECTIONS = [
   { id: "behaviour", name: "Behaviour", icon: "i-spark",
     blurb: "How the model answers you, and what it is allowed to reach for." },
@@ -1647,8 +1552,8 @@ const SETTINGS_SECTIONS = [
     blurb: "Download, load and remove models. Everything here runs on this computer." },
   { id: "storage", name: "Storage", icon: "i-library",
     blurb: "Where your chats, prompts and memory are kept, and how to remove them." },
-  { id: "foundry", name: "Foundry", icon: "i-foundry",
-    blurb: "The service that runs the models. These settings belong to Foundry Local, not to Horizon." },
+  { id: "ollama", name: "Ollama", icon: "i-plug",
+    blurb: "The local service that runs models and manages their downloads." },
   { id: "horizon", name: "Horizon", icon: "i-mark-xs",
     blurb: "How Horizon starts, and where it lives on this computer." }
 ];
@@ -1866,115 +1771,6 @@ function renderReaderSetup(body) {
   });
 }
 
-/* --- speaking instead of typing ------------------------------------------- */
-
-// Off until asked for: it opens the microphone and holds a second model in
-// memory. The panel is blunt about the part nobody can work out for
-// themselves, which is that the recording does not happen in the browser.
-function renderDictationSetup(body) {
-  const section = settingsCard(body, "Dictation",
-    "Speak instead of typing. Your voice never leaves this computer.");
-
-  const loading = el("p", "field-hint busy-dots", "Checking");
-  section.append(loading);
-
-  fetch("/api/dictation")
-    .then(response => response.json())
-    .then(status => {
-      loading.remove();
-
-      // Nothing can be switched on if the machine cannot run it, so the reason
-      // is shown instead of a control that would not work. This should be rare:
-      // the helper is installed with everything else.
-      if (!status.available) {
-        const why = el("p", "field-hint");
-        why.append(icon("i-warn", "inline-glyph"), document.createTextNode(
-          " Dictation needs node-pty, which is not installed here. Run npm install in the Horizon folder, then restart Horizon. Everything else works without it."));
-        section.append(why);
-        return;
-      }
-
-      const row = el("label", "setup-row");
-      const input = el("input");
-      input.type = "checkbox";
-      input.checked = Boolean(status.enabled);
-
-      const text = el("span", "setup-text");
-      text.append(
-        el("span", "setup-name", "Let Horizon listen when you ask it to"),
-        el("span", "setup-hint",
-          "A microphone button appears beside the message box. What you say is written there for you to read and correct, and nothing is sent until you send it.")
-      );
-      row.append(input, text);
-      section.append(row);
-
-      // Shown whether or not it is switched on. The size of the download and
-      // the reason it ships suspended are what someone needs in order to
-      // decide, and they are no use only after the decision is made.
-      const standing = el("p", "field-hint");
-      standing.textContent =
-        `Horizon ships with this suspended by design: it is yours to switch on, not ours to assume. Doing so downloads a speech model (${status.alias}, about 700 MB) the first time you record. It is separate from the model that answers you, runs on this machine like everything else, and is released from memory when unused.`;
-      section.append(standing);
-
-      const detail = el("div", "backup-detail");
-      section.append(detail);
-
-      const paint = () => {
-        detail.textContent = "";
-        if (!input.checked) return;
-
-        // The part that cannot be discovered by using it: the page never opens
-        // the microphone, so the browser's own indicators stay silent.
-        const how = el("p", "field-hint is-warn");
-        how.append(icon("i-warn", "inline-glyph"), document.createTextNode(
-          " Horizon does not record through this browser. Foundry Local opens the microphone itself, so there is no permission prompt and no recording dot in the tab. Windows records the use against Foundry Local. Horizon shows its own red banner for as long as the microphone is open."));
-        detail.append(how);
-
-        detail.append(el("p", "field-hint",
-          "Foundry listens to whatever Windows has set as the default input device, and Horizon cannot choose for you. Change it in Settings, System, Sound if the wrong microphone is heard."));
-
-        const limits = el("p", "field-hint");
-        limits.textContent =
-          `A recording stops after ${Math.round(status.maxRecordingMs / 60000)} minutes, and the speech model is released after ${Math.round(status.idleTimeoutMs / 60000)} minutes unused. Speech recognition is English only.`;
-        detail.append(limits);
-      };
-      paint();
-
-      input.addEventListener("change", async () => {
-        const wanted = input.checked;
-        input.disabled = true;
-        try {
-          const response = await fetch("/api/dictation", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ enabled: wanted })
-          });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error || "That did not work.");
-
-          state.dictation.enabled = Boolean(result.enabled);
-          state.dictation.available = Boolean(result.available);
-          input.checked = state.dictation.enabled;
-          renderDictation();
-          if (state.dictation.enabled) openDictationStream();
-          paint();
-          setNote(state.dictation.enabled
-            ? "Dictation is on. The microphone button is beside the message box."
-            : "Dictation is off.");
-        } catch (error) {
-          input.checked = !wanted;
-          setNote(error.message, "error");
-        } finally {
-          input.disabled = false;
-        }
-      });
-    })
-    .catch(() => {
-      loading.remove();
-      section.append(el("p", "field-hint", "The dictation settings could not be read."));
-    });
-}
-
 /* --- keeping a copy on disk ----------------------------------------------- */
 
 // Off by default. Writing conversations to disk is a bigger commitment than
@@ -2126,12 +1922,7 @@ function renderSettings() {
     const button = el("button", "settings-nav-btn");
     button.type = "button";
     button.setAttribute("aria-current", String(section.id === settingsSection));
-    const isFoundryProvider = (state.provider?.name || "foundry") === "foundry";
-    button.append(
-      section.id === "foundry" && isFoundryProvider
-        ? foundryMark("i-foundry", "settings-nav-mark")
-        : icon(section.icon, "settings-nav-icon"),
-      el("span", null, section.id === "foundry" && !isFoundryProvider ? state.provider.label : section.name));
+    button.append(icon(section.icon, "settings-nav-icon"), el("span", null, section.name));
     button.addEventListener("click", () => {
       settingsSection = section.id;
       renderSettings();
@@ -2150,25 +1941,23 @@ function renderSettings() {
   if (settingsSection === "behaviour") renderBehaviourSettings(panel);
   else if (settingsSection === "models") renderModelsSettings(panel);
   else if (settingsSection === "storage") renderStorageSettings(panel);
-  else if (settingsSection === "foundry") renderFoundrySection(panel);
+  else if (settingsSection === "ollama") renderOllamaSection(panel);
   else renderHorizonSettings(panel);
 }
 
 /* --- models --------------------------------------------------------------- */
 
-// The catalogue was its own workspace behind an "Orchestration" rail button.
-// It is a settings task, so it lives here now; the renderer is unchanged and
-// still paints into a plain container.
+// Model management is a Settings task, rendered into a plain container.
 function renderModelsSettings(panel) {
   const host = el("div", "settings-host");
   panel.append(host);
-  renderCatalogue(host);
+  renderModelManager(host);
 }
 
-/* --- foundry -------------------------------------------------------------- */
+/* --- Ollama --------------------------------------------------------------- */
 
-function renderFoundrySection(panel) {
-  renderFoundrySettings(panel);
+function renderOllamaSection(panel) {
+  renderOllamaSettings(panel);
 
   // Service diagnostics and the request log both describe the running service,
   // so they sit under it rather than in a rail drawer of their own.
@@ -2239,12 +2028,9 @@ function renderBehaviourSettings(panel) {
   // Reading links is a behaviour of the model, not a storage concern.
   renderReaderSetup(panel);
 
-  // Dictation belongs here for the same reason: it changes how you talk to the
-  // model, and like reading links it reaches for something outside the page.
-  renderDictationSetup(panel);
   if (window.HorizonSpeech) {
     const speech = settingsCard(panel, "Read replies aloud",
-      "Uses installed local Windows/browser voices, not Foundry Local. No cloud-voice fallback.");
+      "Uses locally available system voices. No cloud-voice fallback.");
     window.HorizonSpeech.mountSettings(speech);
   }
 }
@@ -2335,7 +2121,7 @@ function renderPickerMenu() {
     text.append(
       el("span", "picker-item-name", model.alias),
       el("span", "picker-item-meta",
-        `${model.device} \u00B7 ${model.sizeMb >= 1024 ? (model.sizeMb / 1024).toFixed(1) + " GB" : model.sizeMb + " MB"}${model.loaded && !active ? " \u00B7 in memory" : ""}`)
+        `${formatModelSize(model.sizeMb)}${model.loaded && !active ? " \u00B7 in memory" : ""}`)
     );
 
     item.append(iconWrap, text);
@@ -2393,6 +2179,41 @@ document.addEventListener("click", event => {
 
 /* =============================================================== status === */
 
+window.addEventListener("horizon-agents-changed", () => refreshStatus());
+$("chat-tools-settings").addEventListener("click", () => {
+  const dialog = el("dialog", "tool-preferences");
+  dialog.append(el("h2", null, "This conversation's approvals"));
+  dialog.append(el("p", "field-hint",
+    "Only enabled tools and existing folder grants apply. These choices never grant new access. Writes, commands, MCP calls, arbitrary clicks and form fills always ask."));
+  for (const [key, label] of [["fileReads", "Read files within granted folders"], ["publicBrowsing", "Read public pages and search"]]) {
+    const row = el("label", "field");
+    row.append(el("span", null, label));
+    const select = el("select", "agent-input");
+    select.setAttribute("aria-label", label);
+    for (const [value, text] of [["allow", "Allow for this conversation"], ["ask", "Ask each time"]]) {
+      const option = el("option", null, text);
+      option.value = value;
+      select.append(option);
+    }
+    select.value = state.chat.toolApprovals?.[key] || "allow";
+    select.disabled = state.busy;
+    select.addEventListener("change", () => {
+      state.chat.toolApprovals = { ...state.chat.toolApprovals, [key]: select.value };
+      if (!state.chat.unsaved) db.updateChat(state.chat.id, { toolApprovals: state.chat.toolApprovals });
+    });
+    row.append(select);
+    dialog.append(row);
+  }
+  const done = el("button", "btn-primary", "Done");
+  done.addEventListener("click", () => dialog.close());
+  const grants = el("button", "btn-subtle", "Review tool and folder grants");
+  grants.addEventListener("click", () => { dialog.close(); $("agents-btn").click(); });
+  dialog.append(done, grants);
+  dialog.addEventListener("close", () => dialog.remove(), { once: true });
+  document.body.append(dialog);
+  dialog.showModal();
+});
+
 async function refreshStatus() {
   try {
     const response = await fetch("/api/status");
@@ -2401,7 +2222,6 @@ async function refreshStatus() {
     refreshAirGap();
     $("chat-tools-settings").textContent = data.conversationTools ? "Tools available" : "Tools off";
     if (data.model) state.assistantLabel = data.model;
-    if (data.provider) state.provider = data.provider;
 
     // /api/status is the single source of truth for which model is active.
     // The picker used to keep its own copy, which drifted after a switch and
@@ -2410,9 +2230,6 @@ async function refreshStatus() {
       state.activeAlias = data.alias;
       if (!ui.pickerMenu.hidden) renderPickerMenu();
     }
-
-    window.addEventListener("horizon-agents-changed", () => refreshStatus());
-    $("chat-tools-settings").addEventListener("click", () => $("agents-btn").click());
 
     state.modelReady = Boolean(data.ready);
     ui.prompt.placeholder = "Send a message";
@@ -2426,7 +2243,7 @@ async function refreshStatus() {
       // the answer is simply that no model has been chosen yet.
       setModelState("warn", "No offline models");
       ui.prompt.placeholder = "Send a message";
-      showBanner("No models on this computer yet. Settings \u2192 Models has the catalogue; each one is downloaded once, then runs without a network.", "warn");
+      showBanner("No models on this computer yet. Settings \u2192 Models lets you pull a model by name and manage downloaded models.", "warn");
     } else {
       setModelState("warn", data.alias || "Not ready");
       showBanner(data.error || "The model is not loaded yet.", "warn");
@@ -2441,11 +2258,10 @@ async function refreshStatus() {
 
 /* ================================================================= send === */
 
-/* ======================================================= foundry workspace = */
+/* ======================================================== Ollama workspace = */
 
-// A full-width workspace for managing Foundry: the catalogue, the service,
-// and its persistent settings. The rail switches between this and the chat.
-const wsState = { tab: "catalogue", models: [], filters: { device: "", type: "", cached: false, search: "" }, busy: new Set(), progressNodes: new Map(), pollTimer: null };
+// A full-width workspace for managing Ollama models and service settings.
+const wsState = { models: [], filters: { search: "" }, busy: new Set(), progressNodes: new Map(), pollTimer: null };
 
 // A large model can take many minutes. Polling the server's live progress is
 // the difference between "it is working" and "it has hung".
@@ -2459,14 +2275,13 @@ function startProgressPolling() {
       return;
     }
     try {
-      const { downloads } = await (await fetch("/api/foundry/progress")).json();
+      const { downloads } = await (await fetch("/api/ollama/progress")).json();
       for (const [alias, nodes] of wsState.progressNodes) {
         const entry = downloads[alias];
         if (!entry || !nodes.bar.isConnected) continue;
 
-        // Foundry reports in coarse jumps (0, 25, 51...), so a long quiet
-        // stretch is normal. Elapsed time is what tells the user it is still
-        // moving; without it a big model looks stalled.
+        // Progress may arrive in coarse jumps, so elapsed time helps show that
+        // a large model is still moving during quiet stretches.
         const elapsed = formatDuration(entry.elapsedMs);
 
         if (entry.percent > 0) {
@@ -2561,31 +2376,16 @@ function wsBusy(node, message) {
 }
 
 // The Orchestration workspace is gone; models, service health and traffic all
-// live in Settings now. These two survive so that actions taken from those
-// cards (download, load, remove) can refresh what is on screen.
+// live in Settings now. This refreshes the screen after model actions.
 async function renderWorkspace() {
   if (state.mode !== "settings") return;
   renderSettings();
 }
 
-async function refreshWorkspaceStatus() {
-  const badge = $("ws-status");
-  if (!badge) return;
-  try {
-    const data = await (await fetch("/api/foundry")).json();
-    badge.dataset.state = !data.installed ? "error" : data.running ? "ready" : "warn";
-    $("ws-status-text").textContent = !data.installed
-      ? "Not installed"
-      : data.running ? `${state.provider?.name === "ollama" ? "Ollama" : "Foundry"} \u00B7 ${data.version || "running"}`.trim() : "Stopped";
-  } catch {
-    badge.dataset.state = "error";
-    $("ws-status-text").textContent = "Unavailable";
-  }
-}
-
-/* --- catalogue ------------------------------------------------------------ */
+/* --- Ollama models -------------------------------------------------------- */
 
 function formatModelSize(mb) {
+  if (!Number.isFinite(mb)) return "-";
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
 }
 
@@ -2596,24 +2396,17 @@ function formatDuration(ms) {
   return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-async function loadCatalogue() {
-  const query = new URLSearchParams();
-  if (wsState.filters.device) query.set("device", wsState.filters.device);
-  if (wsState.filters.type) query.set("type", wsState.filters.type);
-  if (wsState.filters.cached) query.set("cached", "1");
-
-  const response = await fetch(`/api/foundry/catalogue?${query}`);
+async function loadModels() {
+  const response = await fetch("/api/models");
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Could not read the catalogue.");
+  if (!response.ok) throw new Error(data.error || "Could not read Ollama models.");
   wsState.models = (data.models || []).sort((a, b) => {
-    // What is already on this machine is what the user can act on now.
-    const rank = model => (model.loaded ? 0 : model.cached ? 1 : 2);
-    return rank(a) - rank(b) || a.alias.localeCompare(b.alias);
+    return (b.loaded ? 1 : 0) - (a.loaded ? 1 : 0) || a.alias.localeCompare(b.alias);
   });
   wsState.activeAlias = data.activeAlias;
 }
 
-async function renderCatalogue(body) {
+async function renderModelManager(body) {
   body.textContent = "";
   const pane = el("div", "ws-pane");
   body.append(pane);
@@ -2630,50 +2423,27 @@ async function renderCatalogue(body) {
   });
   filters.append(search);
 
-  // Ollama can pull any model by name, so the catalogue is not the limit.
-  if (state.provider?.name === "ollama") {
-    const pullRow = el("div", "ws-filters");
-    const pullInput = el("input", "text-input ws-search");
-    pullInput.type = "text";
-    pullInput.placeholder = "Pull any model by name, e.g. qwen2.5:3b or hf.co/user/repo:Q4_K_M";
-    pullInput.setAttribute("aria-label", "Model name to pull");
-    const pullButton = el("button", "btn-primary", "Pull");
-    pullButton.type = "button";
-    const pull = () => {
-      const name = pullInput.value.trim();
-      if (!name) return;
-      pullInput.value = "";
-      runModelAction(name, "download", `Pulling ${name}`);
-    };
-    pullButton.addEventListener("click", pull);
-    pullInput.addEventListener("keydown", event => { if (event.key === "Enter") pull(); });
-    pullRow.append(pullInput, pullButton);
-    filters.append(pullRow);
-  }
-
-  const chips = el("div", "chip-row");
-  const addChip = (label, key, value) => {
-    const chip = el("button", "chip", label);
-    chip.type = "button";
-    const on = wsState.filters[key] === value || (key === "cached" && value === true && wsState.filters.cached);
-    chip.setAttribute("aria-pressed", String(on));
-    chip.addEventListener("click", async () => {
-      if (key === "cached") wsState.filters.cached = !wsState.filters.cached;
-      else wsState.filters[key] = wsState.filters[key] === value ? "" : value;
-      wsState.models = [];
-      await renderWorkspace();
-    });
-    chips.append(chip);
+  const pullRow = el("div", "ws-filters");
+  const pullInput = el("input", "text-input ws-search");
+  pullInput.type = "text";
+  pullInput.placeholder = "Pull any Ollama model by name, e.g. qwen3:1.7b";
+  pullInput.setAttribute("aria-label", "Ollama model name to pull");
+  const pullButton = el("button", "btn-primary", "Pull");
+  pullButton.type = "button";
+  const pull = () => {
+    const name = pullInput.value.trim();
+    if (!name) return;
+    pullInput.value = "";
+    if (!wsState.models.some(model => model.alias === name)) {
+      wsState.models.unshift({ alias: name, loaded: false, sizeMb: null });
+    }
+    runModelAction(name, "download", `Pulling ${name}`);
   };
+  pullButton.addEventListener("click", pull);
+  pullInput.addEventListener("keydown", event => { if (event.key === "Enter") pull(); });
+  pullRow.append(pullInput, pullButton);
+  filters.append(pullRow);
 
-  addChip("Downloaded", "cached", true);
-  addChip("NPU", "device", "npu");
-  addChip("GPU", "device", "gpu");
-  addChip("CPU", "device", "cpu");
-  addChip("Chat", "type", "chat");
-  addChip("Speech", "type", "speech");
-  addChip("Embedding", "type", "embedding");
-  filters.append(chips);
   pane.append(filters);
 
   const count = el("p", "ws-count");
@@ -2683,9 +2453,9 @@ async function renderCatalogue(body) {
   pane.append(table);
 
   if (!wsState.models.length) {
-    wsBusy(table, "Reading the catalogue");
+    wsBusy(table, "Reading Ollama models");
     try {
-      await loadCatalogue();
+      await loadModels();
     } catch (error) {
       table.textContent = "";
       const failed = el("div", "ws-empty");
@@ -2705,18 +2475,17 @@ async function renderCatalogue(body) {
     const head = el("div", "mrow is-head");
     head.append(
       el("div", null, "Name"),
-      el("div", null, "Type"),
       el("div", null, "Size"),
-      el("div", null, "Device"),
       el("div", null, "Tools"),
-      el("div", null, "Cached"),
+      el("div", null, "Status"),
       el("div", null, "")
     );
     table.append(head);
 
     if (!rows.length) {
       const empty = el("div", "ws-empty");
-      empty.append(icon("i-model"), el("div", null, "Nothing matches those filters."));
+      empty.append(icon("i-model"), el("div", null,
+        wsState.models.length ? "No model names match this search." : "No local models yet. Use the pull box above to add one."));
       table.append(empty);
       return;
     }
@@ -2730,35 +2499,22 @@ async function renderCatalogue(body) {
       const name = el("div", "mname");
       const text = el("div", "mname-text");
       text.append(el("div", "mname-alias", model.alias));
-      // The state that matters most is whether it is live right now, so that
-      // is said in words under the name rather than left to a column.
-      if (active || model.loaded) {
-        text.append(el("div", "mname-state", active ? "In use" : "In memory"));
-      }
       name.append(text);
-
-      const type = el("div", "mcell", model.type);
 
       const size = el("div", "msize", formatModelSize(model.sizeMb));
 
-      const device = el("div");
-      const deviceName = String(model.device || "").toUpperCase();
-      const tag = el("span", "mtag", deviceName);
-      tag.dataset.device = deviceName;
-      device.append(tag);
-
-      // Same vocabulary as the Foundry CLI table: a filled dot means yes.
+      // A filled dot means the model supports tool calling.
       const tools = el("div", "mcell");
-      const toolDot = el("span", "mdot", model.supportsTools ? "\u25CF" : "\u25CB");
-      toolDot.dataset.on = String(Boolean(model.supportsTools));
-      toolDot.title = model.supportsTools ? "Supports tool calling" : "No tool calling";
-      tools.append(toolDot);
+      if (typeof model.supportsTools === "boolean") {
+        const toolDot = el("span", "mdot", model.supportsTools ? "\u25CF" : "\u25CB");
+        toolDot.dataset.on = String(model.supportsTools);
+        toolDot.title = model.supportsTools ? "Supports tool calling" : "No tool calling";
+        tools.append(toolDot);
+      } else {
+        tools.textContent = "Unknown";
+      }
 
-      const cached = el("div", "mcell");
-      const cacheDot = el("span", "mdot", model.cached ? "\u25CF" : "\u25CB");
-      cacheDot.dataset.on = String(Boolean(model.cached));
-      cacheDot.title = model.cached ? "Downloaded to this machine" : "Not downloaded";
-      cached.append(cacheDot);
+      const status = el("div", "mcell", active ? "In use" : model.loaded ? "In memory" : "Available");
 
       const actions = el("div", "mactions");
       const key = model.alias;
@@ -2777,12 +2533,6 @@ async function renderCatalogue(body) {
         actions.append(cell);
         // Filled in by the poller below, which runs while any download is live.
         wsState.progressNodes.set(key, { bar, label });
-      } else if (!model.cached) {
-        const get = el("button", "btn-subtle");
-        get.type = "button";
-        get.append(icon("i-download", "btn-subtle-icon"), document.createTextNode("Download"));
-        get.addEventListener("click", () => runModelAction(key, "download", `Downloading ${key}`));
-        actions.append(get);
       } else {
         if (!active) {
           const use = el("button", "btn-subtle");
@@ -2803,7 +2553,7 @@ async function renderCatalogue(body) {
         }
       }
 
-      row.append(name, type, size, device, tools, cached, actions);
+      row.append(name, size, tools, status, actions);
       table.append(row);
     }
   }
@@ -2818,7 +2568,7 @@ async function runModelAction(alias, action, message) {
   setNote(message);
   if (action === "download") startProgressPolling();
 
-  const path = action === "activate" ? "/api/models/activate" : `/api/foundry/${action}`;
+  const path = action === "activate" ? "/api/models/activate" : `/api/ollama/${action}`;
 
   try {
     const response = await fetch(path, {
@@ -2851,7 +2601,7 @@ async function renderService(body) {
 
   let data;
   try {
-    data = await (await fetch("/api/foundry")).json();
+    data = await (await fetch("/api/ollama")).json();
   } catch {
     pane.textContent = "";
     pane.append(el("p", "panel-note", "The local server is not responding."));
@@ -2867,7 +2617,7 @@ async function renderService(body) {
 
     const steps = el("ol", "setup-steps");
     for (const [text, code] of [
-      ["Install it", state.provider?.name === "ollama" ? "winget install Ollama.Ollama" : "winget install Microsoft.FoundryLocal"],
+      ["Install Ollama", "winget install Ollama.Ollama"],
       ["Close and reopen Horizon", null]
     ]) {
       const step = el("li");
@@ -2877,8 +2627,8 @@ async function renderService(body) {
     }
     card.append(steps);
 
-    const link = el("a", "doc-link", "Foundry Local documentation");
-    link.href = data.docs;
+    const link = el("a", "doc-link", `${runtimeLabel()} documentation`);
+    link.href = "https://docs.ollama.com/";
     link.target = "_blank";
     link.rel = "noreferrer noopener";
     link.append(icon("i-up", "doc-link-icon"));
@@ -2932,10 +2682,10 @@ async function renderService(body) {
   };
 
   if (data.running) {
-    act("Restart", "/api/foundry/restart", "Restarting");
-    act("Stop", "/api/foundry/stop", "Stopping");
+    act("Restart", "/api/ollama/restart", "Restarting");
+    act("Stop", "/api/ollama/stop", "Stopping");
   } else {
-    act("Start", "/api/foundry/start", "Starting", true);
+    act("Start", "/api/ollama/start", "Starting", true);
   }
   status.append(actions);
   grid.append(status);
@@ -2964,7 +2714,7 @@ async function renderService(body) {
   cost.append(el("div", "ws-card-title", "What this is using"));
 
   const daemonMb = data.resources?.daemonMemoryMb;
-  fact(cost, "Foundry service", daemonMb ? formatMegabytes(daemonMb) : "unknown",
+  fact(cost, `${runtimeLabel()} service`, daemonMb ? formatMegabytes(daemonMb) : "unknown",
     { tone: daemonMb && daemonMb > 8192 ? "warn" : null });
   fact(cost, "Horizon itself", data.horizon ? formatMegabytes(data.horizon.memoryMb) : "-");
   if (data.host) {
@@ -3005,139 +2755,24 @@ function formatMegabytes(mb) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
 }
 
-/* --- foundry settings ----------------------------------------------------- */
+/* --- Ollama settings ------------------------------------------------------ */
 
-const SETTING_META = {
-  "port": {
-    name: "Service port",
-    help: "The port Foundry listens on. Leave as auto unless you need a fixed one.",
-    control: "text",
-    placeholder: "auto"
-  },
-  "idle-timeout-minutes": {
-    name: "Idle timeout",
-    help: "Stop the service after this many idle minutes. Disabled keeps models warm.",
-    control: "text",
-    placeholder: "disabled"
-  },
-  "log-level": {
-    name: "Log level",
-    help: "How much detail Foundry writes to its logs.",
-    control: "select",
-    options: ["trace", "debug", "info", "warn", "error"]
-  },
-  "cache-directory": {
-    name: "Model cache",
-    help: "Where downloaded models are stored. Changed from the Foundry CLI.",
-    control: "readonly"
-  }
-};
-
-// Foundry's own settings used to live behind an Orchestration tab, which split
-// "settings" across two places. They now render as a section of the Settings
-// page. Async, so the section is appended immediately and filled once the CLI
-// answers — otherwise it would jump the sections below it.
-async function renderFoundrySettings(parent) {
-  if (state.provider?.name === "ollama") {
-    const note = settingsCard(parent, "Ollama settings",
-      "Ollama is configured with OLLAMA_* environment variables (for example OLLAMA_KEEP_ALIVE and OLLAMA_MODELS), not from Horizon.");
-    return;
-  }
-
-  const section = settingsCard(parent, "Foundry Local settings",
-    "These persist between sessions. Changing one restarts the service.");
-
-  const loading = el("p", "field-hint busy-dots", "Reading settings");
-  section.append(loading);
-
-  let settings;
-  try {
-    const data = await (await fetch("/api/foundry/settings")).json();
-    settings = data.settings || [];
-  } catch {
-    loading.remove();
-    section.append(el("p", "field-hint",
-      `Settings could not be read. ${runtimeLabel()} may not be installed on this computer.`));
-    return;
-  }
-
-  loading.remove();
-
-  if (!settings.length) {
-    section.append(el("p", "field-hint",
-      `${runtimeLabel()} reported no settings. It may not be installed on this computer.`));
-    return;
-  }
-
-  // Render in a deliberate order rather than whatever order the CLI reports.
-  for (const key of Object.keys(SETTING_META)) {
-    const setting = settings.find(item => item.key === key);
-    if (!setting) continue;
-    const meta = SETTING_META[key];
-
-    const row = el("div", "setting-row");
-    const label = el("div");
-    label.append(el("div", "setting-name", meta.name), el("div", "setting-help", meta.help));
-
-    const control = el("div", "setting-control");
-
-    if (meta.control === "readonly") {
-      control.append(el("span", "setting-locked", setting.value));
-    } else if (meta.control === "select") {
-      const select = el("select", "select");
-      for (const option of meta.options) {
-        const node = el("option", null, option);
-        node.value = option;
-        if (option === setting.value) node.selected = true;
-        select.append(node);
-      }
-      select.addEventListener("change", () => saveSetting(setting.key, select.value, select));
-      control.append(select);
-    } else {
-      const input = el("input", "text-input");
-      input.value = setting.value;
-      input.placeholder = meta.placeholder || "";
-      const save = el("button", "btn-subtle", "Save");
-      save.type = "button";
-      save.addEventListener("click", () => saveSetting(setting.key, input.value.trim(), save));
-      control.append(input, save);
-    }
-
-    row.append(label, control);
-    section.append(row);
-  }
-}
-
-async function saveSetting(key, value, control) {
-  const original = control.tagName === "BUTTON" ? control.textContent : null;
-  control.disabled = true;
-  if (original) control.textContent = "Saving";
-
-  try {
-    const response = await fetch("/api/foundry/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, value })
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "That value was not accepted.");
-    setNote(`${key} set to ${value}.`);
-  } catch (error) {
-    setNote(error.message, "error");
-  } finally {
-    control.disabled = false;
-    if (original) control.textContent = original;
-    // These settings now live on the Settings page, so re-rendering the
-    // Orchestration workspace would redraw a hidden pane and throw away the
-    // reader's scroll position. The control already shows the new value; a
-    // changed port or cache path is reflected by the status badge.
-    refreshWorkspaceStatus();
-  }
+function renderOllamaSettings(parent) {
+  const section = settingsCard(parent, "Ollama configuration",
+    "Ollama server options are configured through environment variables, not from Horizon.");
+  section.append(el("p", "field-hint",
+    "For example, OLLAMA_HOST sets the server address, OLLAMA_MODELS sets the model storage location, and OLLAMA_KEEP_ALIVE controls how long models stay loaded."));
+  const link = el("a", "doc-link", "Ollama server configuration");
+  link.href = "https://docs.ollama.com/faq";
+  link.target = "_blank";
+  link.rel = "noreferrer noopener";
+  link.append(icon("i-up", "doc-link-icon"));
+  section.append(link);
 }
 
 /* ------------------------------------------------------------- safe exit -- */
 
-// A loaded model stays resident in the Foundry service after the page closes,
+// A loaded model stays resident in the Ollama service after the page closes,
 // so exiting through this path releases it.
 let exiting = false;
 
@@ -3145,7 +2780,6 @@ function openExitDialog() { $("exit-scrim").hidden = false; $("exit-confirm").fo
 function closeExitDialog() { $("exit-scrim").hidden = true; }
 
 async function safeExit() {
-  const stopService = $("exit-stop-service").checked;
   const confirm = $("exit-confirm");
   confirm.disabled = true;
   confirm.textContent = "Shutting down...";
@@ -3155,14 +2789,12 @@ async function safeExit() {
     await fetch("/api/shutdown", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stopService })
+      body: JSON.stringify({ stopService: false })
     });
   } catch { /* the server may close before replying; that is expected */ }
 
-  $("exit-body").textContent = stopService
-    ? "The model has been released and the Foundry service stopped."
-    : "The model has been released and the local server stopped.";
-  $("exit-stop-service").closest(".modal-check").hidden = true;
+  const exitMessage = "Horizon shutdown requested. Models loaded by Horizon will be released; the Ollama service is left running.";
+  $("exit-body").textContent = exitMessage;
   $("exit-cancel").hidden = true;
   confirm.textContent = "Close this tab";
   confirm.disabled = false;
@@ -3185,9 +2817,7 @@ async function safeExit() {
       const tail = installed
         ? "You can close this window now."
         : "Your browser will not let a page close a tab it did not open, so please close this one yourself.";
-      $("exit-body").textContent = (stopService
-        ? "The model has been released and the Foundry service stopped. "
-        : "The model has been released and the local server stopped. ") + tail;
+      $("exit-body").textContent = `${exitMessage} ${tail}`;
     }, 250);
   };
 }
@@ -3375,7 +3005,9 @@ ui.thread.addEventListener("scroll", () => {
   pinnedToBottom = ui.thread.scrollHeight - ui.thread.scrollTop - ui.thread.clientHeight < 60;
 }, { passive: true });
 
-function scrollIfPinned() { if (pinnedToBottom) ui.thread.scrollTop = ui.thread.scrollHeight; }
+function scrollIfPinned() {
+  if (pinnedToBottom) ui.thread.scrollTo({ top: ui.thread.scrollHeight, behavior: "instant" });
+}
 
 async function submit() {
   if (state.busy) return stopGenerating();
@@ -3451,6 +3083,9 @@ async function submit() {
 
   const caret = el("span", "caret");
   reply.bubble.append(caret);
+  const replyResize = new ResizeObserver(() => scrollIfPinned());
+  replyResize.observe(reply.main);
+  scrollIfPinned();
 
   setBusy(true);
   setNote("Generating...");
@@ -3464,10 +3099,9 @@ async function submit() {
   // Null until the reasoning closes, so an unfinished one is never mistaken for
   // one that finished instantly.
   let thoughtMs = null;
-  let collapsedOnce = false;
   let answerBox = null;
 
-  // Foundry delivers a chunk roughly every 150ms containing a couple of tokens.
+  // The local model streams small chunks to keep the reply responsive.
   // Painting on arrival therefore lurches: a burst of text, then a visible
   // pause, which reads as mechanical typing rather than a flowing answer.
   //
@@ -3486,10 +3120,7 @@ async function submit() {
     if (thinking) {
       if (!thinkingBox) {
         thinkingBox = el("details", "thinking");
-        // Open while it is being written, so the wait is filled with the
-        // model's actual working rather than a spinner. It is collapsed once
-        // the answer starts, because by then the answer is what matters.
-        thinkingBox.open = true;
+        thinkingBox.open = false;
         const summary = el("summary");
         thinkingLabelNode = document.createTextNode("Working it out");
         summary.append(icon("i-orbit", "thinking-glyph"), thinkingLabelNode);
@@ -3508,13 +3139,6 @@ async function submit() {
       // it is done: motion means work in progress, nothing else.
       thinkingBox.classList.toggle("is-live", !closed);
 
-      // Collapsed once, at the moment the reasoning ends, and never again.
-      // Painting runs every frame while the answer reveals, so collapsing on
-      // each pass reached in and shut the box a reader had just opened.
-      if (closed && !collapsedOnce) {
-        collapsedOnce = true;
-        thinkingBox.open = false;
-      }
     }
 
     if (!answerBox) {
@@ -3588,6 +3212,8 @@ async function submit() {
   try {
     toolControl = await window.HorizonChatTools.prepare(state.controller.signal);
     requestBody.clientRunId = toolControl.id;
+    requestBody.conversationId = state.chat.id;
+    requestBody.approvalPreferences = state.chat.toolApprovals;
     toolControl.pending = true;
     const response = await fetch("/api/chat", {
       method: "POST",
@@ -3683,6 +3309,8 @@ async function submit() {
     }
     refreshStatus();
   } finally {
+    replyResize.disconnect();
+    scrollIfPinned();
     // Belt and braces: whatever happened, the waiting state must not survive.
     stopWaiting();
     thinkingBox?.classList.remove("is-live");
@@ -3782,242 +3410,6 @@ document.addEventListener("keydown", event => {
   }
 });
 
-/* ============================================================ dictation === */
-
-/*
- * Speaking instead of typing.
- *
- * The page never opens the microphone. Horizon asks the server to run the
- * Foundry CLI, which opens it instead, and the transcript comes back over an
- * event stream. That is why there is no permission prompt and no recording
- * indicator in the tab: as far as the browser is concerned nothing is being
- * recorded. The banner in the composer is the only signal the user gets, so it
- * is shown for as long as the microphone is open and never suppressed.
- *
- * For the same reason there is no microphone picker here. The choice belongs to
- * Windows, and offering a list the page cannot honour would be a lie.
- */
-
-function dictationTime(ms) {
-  const total = Math.floor(ms / 1000);
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
-}
-
-function renderDictation() {
-  const live = state.dictation.recording;
-  const loading = state.dictation.modelState === "loading";
-  const off = !state.dictation.enabled;
-
-  ui.dictationBar.hidden = !(live || loading);
-
-  // The button is always present, even when dictation is switched off. Hiding
-  // it would mean nobody ever discovers the feature exists; showing it greyed
-  // out, with a tooltip that says where to switch it on, teaches it instead.
-  ui.dictateBtn.hidden = !state.dictation.available;
-  // Left clickable on purpose when switched off: a button that explains itself
-  // and takes you to the switch is more use than one that does nothing.
-  ui.dictateBtn.disabled = loading;
-  ui.dictateBtn.setAttribute("aria-pressed", live ? "true" : "false");
-  ui.dictateBtn.setAttribute("aria-disabled", off ? "true" : "false");
-  ui.dictateBtn.classList.toggle("is-off", off);
-  ui.dictateBtn.title = off
-    ? "Dictation is off. Switch it on in Settings, under Behaviour."
-    : live ? "Stop dictating" : (loading ? "Loading the speech model" : "Dictate");
-  ui.dictateIcon.firstElementChild.setAttribute("href", live ? "#i-mic-on" : "#i-mic");
-
-  // The banner does double duty: it says the speech model is being loaded, and
-  // then that the microphone is open. Pressing record and waiting with no
-  // explanation was indistinguishable from nothing happening.
-  if (loading) {
-    ui.dictationBar.dataset.mode = "loading";
-    ui.dictationStatus.textContent = "Loading the speech model. This happens once, and takes a moment.";
-    ui.dictationTimer.hidden = true;
-    ui.dictationStop.hidden = true;
-  } else {
-    ui.dictationBar.dataset.mode = "recording";
-    ui.dictationStatus.textContent = "Listening. Horizon is recording through your system microphone.";
-    ui.dictationTimer.hidden = false;
-    ui.dictationStop.hidden = false;
-  }
-}
-
-function dictationTick() {
-  ui.dictationTimer.textContent = dictationTime(Date.now() - state.dictation.startedAt);
-}
-
-// The transcript replaces only the spoken part, so anything typed before
-// dictation started is kept and speech is appended to it.
-function applyTranscript(text) {
-  const spoken = String(text || "").trim();
-  const base = state.dictation.base;
-  ui.prompt.value = base && spoken ? `${base} ${spoken}` : base || spoken;
-  // The same work the composer does when text is typed, so a dictated address
-  // raises the link warning exactly as a pasted one would.
-  autoGrow();
-  updateUrlWarning();
-}
-
-function openDictationStream() {
-  if (state.dictation.stream) return;
-  const stream = new EventSource("/api/dictation/events");
-  state.dictation.stream = stream;
-
-  stream.onmessage = event => {
-    let message;
-    try {
-      message = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-
-    if (message.type === "hello") {
-      state.dictation.available = message.available;
-      state.dictation.enabled = message.enabled;
-      state.dictation.modelState = message.modelState || "idle";
-      state.dictation.recording = Boolean(message.state && message.state.recording);
-      renderDictation();
-      return;
-    }
-
-    // The speech model finished loading. Recording starts by itself if it was
-    // asked for while the model was still coming up.
-    if (message.type === "ready") {
-      state.dictation.modelState = "ready";
-      renderDictation();
-      return;
-    }
-
-    if (message.type === "recording") {
-      state.dictation.recording = true;
-      state.dictation.modelState = "ready";
-      state.dictation.startedAt = Date.now();
-      clearInterval(state.dictation.timer);
-      state.dictation.timer = setInterval(dictationTick, 250);
-      dictationTick();
-      renderDictation();
-      return;
-    }
-
-    if (message.type === "text") {
-      if (state.dictation.settled) return;
-      const parts = (message.committed || []).concat(message.active ? [message.active] : []);
-      applyTranscript(parts.join(" "));
-      return;
-    }
-
-    if (message.type === "stopped") {
-      state.dictation.recording = false;
-      clearInterval(state.dictation.timer);
-      if (message.transcript) applyTranscript(message.transcript);
-      // What was spoken becomes part of the text to build on, so a second
-      // recording adds to it rather than overwriting it. Nothing further is
-      // applied until the next recording starts: the server stops sending, and
-      // the page stops listening, so the finished text cannot be doubled.
-      state.dictation.base = ui.prompt.value.trim();
-      state.dictation.settled = true;
-      renderDictation();
-      if (message.reason === "time-limit") {
-        setNote("Recording stopped: the time limit was reached.", "warn");
-      }
-      ui.prompt.focus();
-      return;
-    }
-
-    if (message.type === "error") {
-      state.dictation.recording = false;
-      clearInterval(state.dictation.timer);
-      renderDictation();
-      setNote(message.message || "Dictation failed.", "error");
-      return;
-    }
-
-    if (message.type === "ended") {
-      state.dictation.recording = false;
-      state.dictation.modelState = "idle";
-      clearInterval(state.dictation.timer);
-      renderDictation();
-    }
-  };
-
-  stream.onerror = () => {
-    // The server may simply be restarting; EventSource reconnects by itself.
-    // Recording cannot survive that, so the banner is cleared rather than left
-    // showing an indicator for a microphone nobody holds.
-    if (state.dictation.recording) {
-      state.dictation.recording = false;
-      clearInterval(state.dictation.timer);
-      renderDictation();
-    }
-  };
-}
-
-async function dictationCall(action) {
-  const response = await fetch("/api/dictation", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action })
-  });
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({}));
-    throw new Error(detail.error || `Dictation request failed (${response.status}).`);
-  }
-  return response.json();
-}
-
-async function toggleDictation() {
-  // Switched off: say so, and go to the switch rather than leaving the user to
-  // hunt for it.
-  if (!state.dictation.enabled) {
-    setNote("Dictation is off. Opening Settings so you can switch it on.");
-    setMode("settings");
-    settingsSection = "behaviour";
-    renderSettings();
-    return;
-  }
-
-  try {
-    if (state.dictation.recording) {
-      await dictationCall("stop");
-      return;
-    }
-    // Whatever is already in the box is kept; speech is added to it.
-    window.HorizonSpeech?.stop();
-    state.dictation.base = ui.prompt.value.trim();
-    state.dictation.settled = false;
-    // Shown immediately rather than after the request returns, so pressing the
-    // button always produces a visible response.
-    if (state.dictation.modelState !== "ready") {
-      state.dictation.modelState = "loading";
-      renderDictation();
-    }
-    await dictationCall("record");
-    setNote("Your conversation stays on this machine.");
-  } catch (error) {
-    setNote(error.message, "error");
-  }
-}
-
-async function refreshDictationState() {
-  try {
-    const response = await fetch("/api/dictation");
-    if (!response.ok) return;
-    const status = await response.json();
-    state.dictation.available = Boolean(status.available);
-    state.dictation.enabled = Boolean(status.enabled);
-    state.dictation.modelState = status.modelState || "idle";
-    state.dictation.recording = Boolean(status.state && status.state.recording);
-    renderDictation();
-    if (status.enabled && status.available) openDictationStream();
-  } catch {
-    // Dictation is optional; its absence must never stop the page loading.
-  }
-}
-
-ui.dictateBtn.addEventListener("click", toggleDictation);
-ui.dictationStop.addEventListener("click", () => {
-  if (state.dictation.recording) toggleDictation();
-});
-
 // The air-gap badge is a claim about where your data goes, so pressing it
 // shows the evidence rather than repeating the claim.
 ui.airgapBadge.addEventListener("click", openTrafficLog);
@@ -4030,7 +3422,6 @@ ui.airgapBadge.addEventListener("click", openTrafficLog);
   // browser looks like the data was simply lost.
   await refreshBackupState();
   await refreshReaderState();
-  await refreshDictationState();
   await offerRestore();
 
   // Any change to chats, prompts, memory, library or preferences updates the

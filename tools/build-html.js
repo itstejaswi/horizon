@@ -77,23 +77,6 @@ const brand = `  <!-- The Horizon mark: a solid world with an open orbital arc s
     <rect x="2.4" y="2.9" width="4.2" height="8.7" rx="1.2"
           fill="none" stroke="currentColor" stroke-width="1.6"/>
   </symbol>
-  <!-- Dictation. Drawn here rather than taken from the icon set, for the same
-       reason as the glyphs above: the build has to work without the Fluent
-       package present. Same 20px grid and 1.6 stroke weight. The filled
-       version marks the recording state, where an outline is too quiet: the
-       browser shows no recording indicator of its own for this, because the
-       Foundry CLI opens the microphone rather than the page. -->
-  <symbol id="i-mic" viewBox="0 0 20 20">
-    <rect x="7.6" y="2.4" width="4.8" height="9.2" rx="2.4"
-          fill="none" stroke="currentColor" stroke-width="1.6"/>
-    <path d="M4.9 9.6a5.1 5.1 0 0 0 10.2 0M10 14.7v2.9"
-          fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-  </symbol>
-  <symbol id="i-mic-on" viewBox="0 0 20 20">
-    <rect x="7.6" y="2.4" width="4.8" height="9.2" rx="2.4" fill="currentColor"/>
-    <path d="M4.9 9.6a5.1 5.1 0 0 0 10.2 0M10 14.7v2.9"
-          fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-  </symbol>
   <!-- Past conversations. Drawn rather than taken from the icon set, for the
        same reason as the glyphs above. A clock with a hand turned back: the
        rail already uses a speech bubble for the chat view, and using one again
@@ -125,31 +108,6 @@ const brand = `  <!-- The Horizon mark: a solid world with an open orbital arc s
       <path d="M16 5.6a10.4 10.4 0 0 1 0 20.8"/>
       <path d="M16 26.4a10.4 10.4 0 0 1-8.6-4.5"/>
     </g>
-  </symbol>
-  <!-- A fallback glyph for the Foundry section, used only when Microsoft's own
-       icon cannot be read from the local install (Foundry not installed, or the
-       package directory unreadable). Where the real mark is available it is
-       shown instead: naming Microsoft's product while drawing our own symbol
-       for it reads as approximating the brand rather than crediting it. A
-       tilted vessel pouring into a pool is the stand-in. Attribution and the
-       trademark notice sit on the About page. -->
-  <symbol id="i-foundry" viewBox="0 0 20 20">
-    <path d="M3.6 4.3h7.9l-1.5 4.4a2.4 2.4 0 0 1-2.3 1.6H6.9a2.4 2.4 0 0 1-2.3-1.6z"
-          fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-    <path d="M11.5 6.5c1.9.5 3 1.9 3.3 4.2" fill="none" stroke="currentColor"
-          stroke-width="1.6" stroke-linecap="round"/>
-    <circle cx="14.8" cy="12.4" r="1.15" fill="currentColor"/>
-    <path d="M3.4 16.1h13.2" fill="none" stroke="currentColor"
-          stroke-width="1.6" stroke-linecap="round"/>
-  </symbol>
-  <symbol id="i-foundry-on" viewBox="0 0 20 20">
-    <path d="M3.6 4.3h7.9l-1.5 4.4a2.4 2.4 0 0 1-2.3 1.6H6.9a2.4 2.4 0 0 1-2.3-1.6z"
-          fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-    <path d="M11.5 6.5c1.9.5 3 1.9 3.3 4.2" fill="none" stroke="currentColor"
-          stroke-width="1.6" stroke-linecap="round"/>
-    <circle cx="14.8" cy="12.4" r="1.15" fill="currentColor"/>
-    <path d="M3.4 16.1h13.2" fill="none" stroke="currentColor"
-          stroke-width="1.6" stroke-linecap="round"/>
   </symbol>
   <!-- The model glyph. The Fluent developer_board icon has a circular core
        with radiating pins, which at small sizes reads as an eyeball with

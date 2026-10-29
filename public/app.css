@@ -613,7 +613,23 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .chat-title-btn:hover { background: var(--hover); }
 
 /* Model picker */
-.model-picker { position: relative; }
+.model-picker { position: relative; min-width: 0; }
+
+@media (max-width: 640px) {
+  .topbar { flex-wrap: wrap; gap: var(--sp-s); padding: var(--sp-m); }
+  .topbar-brand { margin-left: 0; }
+  .topbar-mid { display: none; }
+  .topbar-right { flex: 1 1 100%; width: 100%; }
+  .topbar-right .model-picker { flex: 1; }
+  .topbar-right .picker-btn { width: 100%; }
+  .topbar-right .picker-menu {
+    left: 0;
+    right: auto;
+    min-width: 0;
+    width: min(320px, calc(100vw - 48px));
+    max-width: calc(100vw - 48px);
+  }
+}
 
 .picker-btn {
   display: inline-flex;
@@ -760,10 +776,8 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 }
 
 /* The third state is not a status, it is an event: Horizon is fetching a page
-   right now. Modelled on the indicator an operating system shows while the
-   camera or microphone is live - deliberately conspicuous, and gone again
-   shortly after the fetch ends. Amber rather than red: this is something the
-   user asked for, not something being done behind their back. */
+   right now. It is deliberately conspicuous, then clears shortly after the
+   fetch ends. Amber rather than red: this is something the user asked for. */
 .badge[data-state="reaching"] {
   background: var(--warning-bg);
   color: var(--warning-fg);
@@ -887,7 +901,7 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
      on the trailing edge only -- "both-edges" is dropped by Chromium -- so the
      composer below matches it explicitly. */
   scrollbar-gutter: stable;
-  padding: var(--sp-xxl) var(--sp-xxl) var(--sp-m);
+  padding: 16px 24px 12px;
   background: var(--surface);
   border-radius: var(--r-plane);
   box-shadow: var(--elev-2);
@@ -925,9 +939,9 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 
 .turn {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   max-width: var(--col-w);
-  margin: 0 auto 22px;
+  margin: 0 auto 16px;
   animation: rise var(--d-slow) var(--curve-decel);
 }
 .turn.user { flex-direction: row-reverse; }
@@ -981,9 +995,11 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   box-shadow: var(--elev-1);
 }
 .turn.assistant .bubble {
-  background: var(--surface-sunken);
-  border: var(--stroke-thin) solid var(--stroke-3);
-  border-top-left-radius: var(--r-md);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0;
+  box-shadow: none;
 }
 .turn.user .bubble {
   background: var(--brand-bg);
@@ -1092,10 +1108,23 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   margin-left: 2px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
-  transform: translateY(-2px) rotate(45deg);
+  transform: rotate(-45deg);
   transition: transform 150ms var(--curve-ease);
 }
-.thinking[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
+.thinking[open] > summary::after { transform: translateY(-2px) rotate(45deg); }
+.turn.assistant .bubble:has(> .waiting):not(:has(> span:not(.caret))):not(:has(> .thinking)) {
+  padding: 4px 0;
+  background: transparent;
+  box-shadow: none;
+}
+.turn.assistant .bubble:has(> .waiting) > .caret { display: none; }
+.chat-tool-activity { background: transparent; margin: 4px 0; }
+.chat-tool-activity > summary { padding: 4px 0; font-weight: 400; }
+.chat-tool-activity > summary::after { order: -1; margin: 0 4px 0 0; }
+.thinking.is-live > summary { animation: activity-breathe 1.8s ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) {
+  .thinking.is-live > summary { animation: none; }
+}
 .thinking-glyph { width: 14px; height: 14px; color: var(--brand-fg); }
 /* The orbit turns while the reasoning is still being written, and stops when
    it is finished. Motion here means work in progress and nothing else. */
@@ -1300,61 +1329,6 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   color: var(--brand-fg);
 }
 
-/* The recording banner. Browsers show their own indicator when a page opens the
-   microphone, but Horizon never does: the Foundry CLI opens it instead, so the
-   tab stays silent and there is no permission prompt. This banner is the only
-   signal the user gets from Horizon, so it uses the danger palette and a moving
-   dot rather than sitting quietly in the interface. */
-.dictation-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-s);
-  max-width: var(--col-w);
-  margin: 0 auto var(--sp-s);
-  padding: var(--sp-s) var(--sp-mnudge);
-  border: var(--stroke-thin) solid var(--danger-fg);
-  border-radius: var(--r-xl);
-  background: var(--danger-bg);
-  color: var(--danger-fg);
-  font-size: 12px;
-  line-height: 16px;
-  animation: rise var(--d-fast) var(--curve-decel);
-}
-.dictation-dot {
-  width: 9px;
-  height: 9px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--danger);
-  animation: dictation-pulse 1.2s ease-in-out infinite;
-}
-.dictation-timer { margin-left: auto; font-variant-numeric: tabular-nums; }
-.dictation-bar .btn-subtle { color: inherit; }
-/* Loading the speech model is information, not a live microphone, so it drops
-   the alarm colouring. Only a real recording gets the danger palette. */
-.dictation-bar[data-mode="loading"] {
-  border-color: var(--brand-fg);
-  background: var(--brand-tint);
-  color: var(--brand-fg);
-}
-.dictation-bar[data-mode="loading"] .dictation-dot { background: var(--brand-fg); }
-@keyframes dictation-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.25; }
-}
-/* Reduced motion still needs the indicator to read as active, so the dot holds
-   a steady full-strength colour instead of fading. */
-@media (prefers-reduced-motion: reduce) {
-  .dictation-dot { animation: none; }
-  .dictation-bar { animation: none; }
-}
-.btn-dictate[aria-pressed="true"] { color: var(--danger); }
-/* Switched off. Shown rather than hidden, because a button nobody can see is a
-   feature nobody discovers; the tooltip says where to switch it on, and
-   pressing it goes there. */
-.btn-dictate.is-off { opacity: 0.42; }
-.btn-dictate.is-off:hover { opacity: 0.72; }
-
 .attachments {
   display: flex;
   flex-wrap: wrap;
@@ -1541,7 +1515,7 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
      themselves, so any difference here puts the composer and the messages on
      two different centres -- a step down the right-hand edge, invisible on a
      narrow window and obvious on a wide one. */
-  padding: 12px calc(var(--sp-xxl) + var(--scrollbar-w)) 12px var(--sp-xxl);
+  padding: 10px calc(24px + var(--scrollbar-w)) 10px 24px;
   background: var(--surface);
   border-radius: var(--r-plane);
   box-shadow: var(--elev-2);
@@ -1869,12 +1843,7 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   background: var(--surface-2);
 }
 .about-brand-mark svg { width: 16px; height: 16px; }
-/* Foundry's real icon, when the local install provides one. It replaces the
-   fallback glyph entirely, so it fills the tile. */
-.about-brand-mark[data-real="true"] { background: none; border-color: transparent; padding: 0; }
-.about-brand-img { width: 28px; height: 28px; border-radius: var(--r-lg); display: block; }
 .about-brand-mark[data-brand="horizon"] { background: var(--brand-bg); border-color: transparent; color: #fff; }
-.about-brand-mark[data-brand="foundry"] { color: var(--fg-2); }
 /* Credit links are underlined only on hover: at rest they should read as the
    heading and the byline they are, not as a row of blue text. */
 .about-credit-link {
@@ -1973,16 +1942,6 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 }
 .settings-nav-btn[aria-current="true"] .settings-nav-icon { color: var(--brand-fg); }
 
-/* The Foundry row carries Microsoft's own icon, read from the local install.
-   It sits in a 16px slot like every other glyph, so the row heights match. */
-.settings-nav-mark {
-  width: 16px; height: 16px; flex: none;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.settings-nav-mark-glyph { width: 16px; height: 16px; color: var(--fg-3); }
-.settings-nav-mark-img { width: 16px; height: 16px; border-radius: 3px; display: block; }
-.settings-nav-btn[aria-current="true"] .settings-nav-mark-glyph { color: var(--brand-fg); }
-
 .settings-panel { display: flex; flex-direction: column; gap: var(--sp-l); min-width: 0; }
 .settings-heading {
   margin: 0;
@@ -2038,11 +1997,11 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   padding-top: 0;
   border-top: none;
 }
-/* The catalogue and service panes came from the old workspace, where they sat
+/* The model and service panes came from the old workspace, where they sat
    on a padded plane of their own. Inside Settings the panel already provides
    that, so they contribute layout only. */
 .settings-host { display: contents; }
-/* The catalogue and service panes were built for a centred workspace of their
+/* The model and service panes were built for a centred workspace of their
    own. Inside the Settings panel they should fill it, or the table floats in
    the middle with dead space on both sides. */
 .settings-host .ws-pane {
@@ -2052,13 +2011,10 @@ svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
   max-width: none;
   margin: 0;
 }
-/* Wider name column and roomier actions once there is room for them: model
-   aliases were being clipped at the old 1240px measure. Below that the
-   original tighter columns are kept, or the fixed columns alone (618px)
-   overflow a smaller window. */
+/* Give model names and actions more room on wide screens. */
 @media (min-width: 1400px) {
   .settings-host .mrow {
-    grid-template-columns: minmax(0, 1fr) 110px 96px 88px 68px 76px 180px;
+    grid-template-columns: minmax(0, 1fr) 100px 72px 92px 180px;
   }
 }
 .settings-host .mrow {
@@ -2266,7 +2222,7 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .panel-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
 /* ============================================================================
-   Foundry workspace
+   Settings workspace
    ========================================================================== */
 .rail-modes { padding-bottom: 2px; }
 .rail-rule {
@@ -2379,9 +2335,8 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .mtable { display: flex; flex-direction: column; }
 .mrow {
   display: grid;
-  /* Name, Type, Size, Device, Tools, Cached, actions -- the same columns the
-     Foundry CLI table shows, in the same order, so the two read alike. */
-  grid-template-columns: minmax(0, 1fr) 96px 78px 72px 56px 62px 150px;
+  /* Name, Size, tool support, download status and actions. */
+  grid-template-columns: minmax(0, 1fr) 78px 56px 72px 150px;
   align-items: center;
   gap: 12px;
   padding: 12px 12px;
@@ -2409,13 +2364,8 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.mname-sub { font-size: 12px; color: var(--fg-3); }
-/* Only shown when a model is actually live, so it is worth the emphasis. */
-.mname-state { font-size: 12px; line-height: 16px; color: var(--success-fg); font-weight: 600; }
 .mcell { font-size: 12px; color: var(--fg-2); }
-/* Filled and hollow dots, matching the Foundry CLI table's own notation.
-   The soft halo is what the terminal's own status dots give you, and it
-   carries the state at a glance without needing to read the column. */
+/* Filled and hollow dots show whether a model supports tool calling. */
 .mdot {
   font-size: 11px;
   line-height: 16px;
@@ -2447,8 +2397,7 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
   width: 0;
   border-radius: var(--r-pill);
   background: var(--brand-bg);
-  /* Foundry reports in coarse jumps, so ease between them rather than
-     snapping, which reads as continuous movement. */
+  /* Ease between progress updates rather than snapping. */
   transition: width var(--d-slow) var(--curve-decel);
 }
 /* Before the first percentage arrives there is no honest position to show, so
@@ -2467,27 +2416,6 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
   color: var(--fg-3);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-}
-
-.mtag {
-  display: inline-flex;
-  align-items: center;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: var(--r-pill);
-  background: var(--surface-sunken);
-  color: var(--fg-2);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.mtag[data-device="NPU"] { background: #efe7fb; color: #5c2e91; }
-.mtag[data-device="GPU"] { background: var(--brand-tint); color: var(--brand-fg); }
-.mtag[data-device="CPU"] { background: var(--surface-sunken); color: var(--fg-2); }
-
-:root[data-theme="dark"] .mtag[data-device="Npu"] { background: #241a33; color: #c49af0; }
-@media (prefers-color-scheme: dark) {
-  :root[data-theme="auto"] .mtag[data-device="Npu"] { background: #241a33; color: #c49af0; }
 }
 
 .msize { font-size: 12px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
@@ -2533,32 +2461,6 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .ws-fact-val.is-mono { font-family: var(--font-mono); word-break: normal; overflow-wrap: anywhere; }
 .ws-fact-val[data-tone="good"] { color: var(--success-fg); font-weight: 600; }
 .ws-fact-val[data-tone="warn"] { color: var(--warning-fg); font-weight: 600; }
-
-.setting-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: var(--stroke-thin) solid var(--stroke-3);
-}
-.setting-row:last-child { border-bottom: 0; }
-.setting-name { font-size: 14px; font-weight: 600; }
-.setting-help { font-size: 12px; line-height: 16px; color: var(--fg-3); margin-top: 2px; }
-.setting-control { display: flex; align-items: center; gap: 6px; }
-.setting-control .text-input, .setting-control .select { width: 150px; }
-.setting-locked {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--fg-3);
-  /* Settings is a full-width page now, so a typical cache path fits on one
-     line. CSS cannot break at path separators, and "break-all" split "models"
-     into "mod els", so give it room first and only wrap as a last resort. */
-  max-width: 560px;
-  text-align: right;
-  word-break: normal;
-  overflow-wrap: anywhere;
-}
 
 .busy-dots::after {
   content: "";
@@ -2622,7 +2524,7 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .modal-check input { accent-color: var(--brand-bg); width: 15px; height: 15px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
-/* First-run setup steps, shown when Foundry is not installed. */
+/* First-run setup steps, shown when Ollama is not installed. */
 .setup-steps {
   margin: 0;
   padding-left: 20px;
@@ -2646,7 +2548,7 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
   word-break: break-all;
 }
 
-/* Foundry service card */
+/* Ollama service card */
 .svc-head { display: flex; align-items: center; gap: 10px; }
 .svc-dot {
   width: 9px; height: 9px;
@@ -2831,3 +2733,16 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
 /* The thumb must not run into the plane's rounded corners, or it reads as a
    notch cut out of the card. */
 .thread::-webkit-scrollbar-track { margin-block: var(--r-plane); }
+.tool-preferences {
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--stroke-1);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--fg-1);
+}
+.tool-preferences::backdrop { background: rgb(0 0 0 / 45%); }
+.tool-preferences .field { display: grid; gap: 8px; margin: 16px 0; }
+.tool-preferences button { margin: 4px; }

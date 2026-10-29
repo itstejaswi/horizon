@@ -155,28 +155,12 @@
         <span id="url-warning-text">The model can't open links. It guesses from the address, so details may be invented. Paste the text or attach the page instead.</span>
       </div>
 
-      <!-- Shown only while a recording is running. The tab shows no recording
-           indicator of its own, because the page never opens the microphone:
-           the Foundry CLI does. This banner is therefore the only thing
-           telling the user they are being listened to, and it is deliberately
-           impossible to miss. -->
-      <div class="dictation-bar" id="dictation-bar" hidden role="status" aria-live="assertive">
-        <span class="dictation-dot" id="dictation-dot" aria-hidden="true"></span>
-        <span id="dictation-status">Listening. Horizon is recording through <span id="dictation-source">your system microphone</span>.</span>
-        <span class="dictation-timer" id="dictation-timer">0:00</span>
-        <button class="btn-subtle" id="dictation-stop" type="button">Stop</button>
-      </div>
-
       <div class="composer" id="composer">
         <button class="btn-attach" id="prompt-library" type="button" title="Insert a saved prompt" aria-label="Insert a saved prompt">
           <svg><use href="#i-bookmark"/></svg>
         </button>
         <button class="btn-attach" id="attach-btn" type="button" title="Attach a text file" aria-label="Attach a text file">
           <svg><use href="#i-plus"/></svg>
-        </button>
-        <button class="btn-attach btn-dictate" id="dictate-btn" type="button" hidden
-                title="Dictate" aria-label="Dictate" aria-pressed="false">
-          <svg id="dictate-icon"><use href="#i-mic"/></svg>
         </button>
         <input type="file" id="attach-input" multiple hidden
                accept=".txt,.md,.markdown,.csv,.tsv,.json,.xml,.yml,.yaml,.log,.js,.ts,.jsx,.tsx,.py,.rb,.go,.rs,.java,.cs,.c,.h,.cpp,.sql,.sh,.ps1,.bat,.ini,.cfg,.conf,.html,.css">
@@ -187,7 +171,7 @@
       </div>
       <div class="composer-foot">
         <span class="foot-note" id="note">Your conversation stays on this machine.</span>
-        <button class="btn-subtle" id="chat-tools-settings" type="button" title="Configure tools and permissions in Agents settings">Tools off</button>
+        <button class="btn-subtle" id="chat-tools-settings" type="button" title="Review this conversation's approvals and tool grants">Tools off</button>
       </div>
       <div class="credit">
         <button class="badge" id="airgap-badge" data-state="pending" type="button"
@@ -235,13 +219,9 @@
       <h2 class="modal-title" id="exit-title">Shut down Horizon</h2>
     </div>
     <p class="modal-body" id="exit-body">
-      Your model is held in memory by the Foundry service. Shutting down this way releases it
-      and stops the local server, so the memory is returned to your machine.
+      Shutting down releases models loaded by Horizon and stops Horizon's local server.
+      The Ollama service is left running.
     </p>
-    <label class="modal-check">
-      <input type="checkbox" id="exit-stop-service" checked>
-      <span>Also stop the Foundry service</span>
-    </label>
     <div class="modal-actions">
       <button class="btn-subtle" id="exit-cancel" type="button">Keep working</button>
       <button class="btn-primary" id="exit-confirm" type="button">Shut down</button>

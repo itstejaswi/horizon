@@ -2,7 +2,9 @@
 
 # Horizon
 
-A private AI workspace for local chat with **Microsoft Foundry Local**. Chats, saved prompts, memory and a document library — with the runtime managed for you, not left to a terminal. Optional agent tools can access the network or run trusted local programs; those capabilities are off until enabled.
+A private AI workspace for local chat with **Ollama**. Chats, saved prompts, memory and a document library — with Horizon's agent runtime coordinating local inference and permitted tools. Optional agent tools can access the network or run trusted local programs; those capabilities are off until enabled.
+
+**Runtime status:** this checkout contains source-only Ollama plumbing. The Ollama-only runtime has **not** been validated here: no dependency installation, build, tests, inference, or browser run was performed. Use an isolated approved environment for acceptance before relying on it.
 
 Chat and model requests stay on this machine; there is no account, subscription, or cloud inference service. Optional Agents can be configured to use public HTTPS pages or trusted command and MCP executables, which may have external effects. Keep Agents disabled for offline use, and read the access and storage notes below before enabling them.
 
@@ -15,41 +17,41 @@ Not only developers. Horizon exists for anyone who wants an assistant that is *t
 - Someone on a boat, a plane, a field site, or any connection they cannot rely on
 - Anyone who wants to experiment with a language model without an account, a subscription, a token budget, or a quota
 
-The goal is not to manage inference runtimes. The goal is to have somewhere to keep your chats, your prompts, your documents and your notes, with a model that answers from your own hardware. Foundry Local does the running; Horizon is the place you work.
+The goal is to have somewhere to keep your chats, prompts, documents and notes, with a model that answers from your own hardware. Ollama provides inference; Horizon owns the LangGraph harness, controls the tools, and keeps the Human at its web UI in authority.
 
 ## Is this the right tool for you?
 
-Horizon **manages the Foundry Local service itself** rather than treating it as one backend among many. It starts and stops the service, downloads and loads models, re-discovers the port when Foundry restarts, and unloads the model to give you the memory back when you are done. That is the whole point of it.
+Horizon is built around **Ollama as its sole inference provider**. It uses Ollama's native loopback service and manages the Horizon-selected model; Ollama remains an independently owned service.
 
-If you want a general-purpose front end that speaks to many providers — OpenAI, Anthropic, Ollama, Foundry Local and others behind one interface — then [Open WebUI](https://github.com/open-webui/open-webui) or [AnythingLLM](https://github.com/Mintplex-Labs/anything-llm) will serve you better. Both are mature, well supported, and have far more features than this does. Point them at Foundry Local's endpoint and they work.
+If you want a general-purpose front end that speaks to many providers — OpenAI, Anthropic, Ollama and others behind one interface — then [Open WebUI](https://github.com/open-webui/open-webui) or [AnythingLLM](https://github.com/Mintplex-Labs/anything-llm) will serve you better. Both are mature, well supported, and have far more features than this does.
 
-Choose Horizon if you want the opposite trade: one runtime, understood properly, with no Docker, no Electron, no account, and nothing to install beyond Node.js to run it.
+Choose Horizon if you want the opposite trade: a Horizon-owned agent harness over one local inference runtime, with no Docker, no Electron, and no account. Node.js and Ollama are required.
 
 ## What you actually need
 
 - Windows 10 or Windows 11
 - PowerShell 5.1 or later (already included with Windows)
-- Node.js 18 or later
+- Node.js 20 or later (use a supported LTS, such as 22 or 24; LangChain Core now requires at least 20)
 - Roughly 10 GB of free disk space for the model and its supporting files
 - Internet access for one-time setup, and optionally for link reading or Agents/browser tools you choose to use
-- A microphone, only if you want to dictate. That is optional and off by default.
+- A local Ollama installation, in addition to Node.js.
 
 ## Getting started
 
-No terminal knowledge needed. If you have never used one, follow **A**.
+The first launch is a double-click; preparing the model once requires running
+the setup script in PowerShell.
 
 ### A. The simple way — download the ZIP
 
-**1. Install Foundry Local and Node.js**
+**1. Install Ollama and Node.js**
 
 Open **PowerShell** from the Start menu (just type `powershell`), paste these two lines in, and press Enter after each. This is the only time you need it.
 
 ```powershell
-winget install Microsoft.FoundryLocal
 winget install OpenJS.NodeJS.LTS
 ```
 
-If `winget` is not recognised, download them by hand instead: [Foundry Local](https://learn.microsoft.com/en-us/azure/foundry-local/get-started) and [Node.js](https://nodejs.org) (choose the **LTS** version).
+Install Ollama from [ollama.com/download](https://ollama.com/download). If `winget` is not recognised, install Node.js from [nodejs.org](https://nodejs.org) (choose the **LTS** version).
 
 **2. Download Horizon**
 
@@ -84,9 +86,13 @@ A small black window opens — that is the server, and it stays open while Horiz
 http://127.0.0.1:3000
 ```
 
-The first launch downloads the model, which is around 8.4 GB and takes a while. After that it works offline.
+The configured default model is `qwen3:1.7b`. Before your first chat, open
+PowerShell in the extracted folder and run `.\scripts\Setup-Horizon.ps1` once;
+it checks prerequisites and downloads the model if needed. Model downloads
+require internet access. Once the model is present, local inference does not
+require network access.
 
-> ⚠️ **Do not close the black window to quit.** That window *is* the server. Closing it kills Horizon mid-request and leaves the model — several gigabytes — sitting in memory. Use the **power button** at the bottom of the left rail instead: it unloads the model, optionally stops the Foundry service, and gives the memory back. `Ctrl+C` in that window does the same thing properly.
+> ⚠️ **Do not close the black window to quit.** That window *is* the Horizon server. Use the **power button** at the bottom of the left rail or `Ctrl+C` for a graceful shutdown. Horizon unloads the model it owns; it does not stop the separately owned Ollama service.
 
 > If Windows shows **"Windows protected your PC"**, click **More info** then **Run anyway**. That warning appears for any file from the internet that is not commercially signed. Ticking Unblock in step 3 usually prevents it.
 
@@ -95,7 +101,6 @@ The first launch downloads the model, which is around 8.4 GB and takes a while. 
 Cloning avoids the unblock step entirely, because files created by Git are not tagged as coming from the internet.
 
 ```powershell
-winget install Microsoft.FoundryLocal
 winget install OpenJS.NodeJS.LTS
 git clone https://github.com/itstejaswi/horizon
 cd horizon
@@ -104,33 +109,11 @@ cd horizon
 
 `Start Horizon.bat` manages dependency installation on first run for both ZIP downloads and Git clones. Running `npm install` by hand is optional.
 
-Dictation is off until you ask for it, because it opens the microphone and holds a second model in memory. Switch it on under **Settings → Behaviour**, or set it in `config.local.json` if you prefer:
-
-```json
-{ "dictation": { "enabled": true } }
-```
-
-The first recording downloads a speech model (about 700 MB) and loads it, which takes a moment. Horizon says so while it happens.
-
-**Worth knowing before you use it:** Horizon does not record through your browser. The page never asks for the microphone, so there is no permission prompt and no recording indicator in the tab. Instead the server runs Foundry Local's own command line tool through a pseudo terminal — a native channel, outside the browser entirely — and that process opens the microphone. Windows attributes it to *Foundry Local CLI* rather than to your browser, which is why the browser's own indicators stay silent: as far as it is concerned, nothing is being recorded.
-
-That is also why Horizon shows its own red banner for as long as the microphone is open. It is the only signal the page can give you, so it is deliberately hard to miss.
-
-That has three consequences worth knowing before you rely on it:
-
-- **Foundry uses whatever Windows has set as the default input device**, and Horizon cannot choose for you. There is no microphone picker, because the page never opens the microphone and a list it could not honour would be a lie. If your words are not being heard, change the default input in *Settings → System → Sound* and start the recording again.
-- **Browser microphone permission is irrelevant.** Dictation works whether or not the page has been granted access, and works in a private window. The controls that apply are the Windows ones.
-- **A recording stops when the page goes away.** Closing the tab, closing the browser or refreshing all end the session, so a recording cannot outlive the only thing showing that it is running.
-
-Two limits are fixed rather than configurable: a single recording stops after five minutes, and an unused speech model is released after five minutes of inactivity. Both are there so a forgotten session cannot hold the microphone open or keep a model in memory.
-
-Speech recognition is **English only**. Foundry ships one streaming model per language, and Horizon uses the English one.
-
 ### Read replies aloud
 
-Assistant replies have a **Read aloud** button. **Settings → Behaviour → Read aloud** lets you select a local voice and opt in to automatic reading; automatic reading starts off. Playback stops when you submit another prompt, start dictation, start a new conversation, hide the tab or close it.
+Assistant replies have a **Read aloud** button. **Settings → Behaviour → Read aloud** lets you select a local voice and opt in to automatic reading; automatic reading starts off. Playback stops when you submit another prompt, start a new conversation, hide the tab or close it.
 
-This is Windows/browser speech synthesis, **not Foundry Local TTS**. Only voices the browser explicitly identifies as local (`localService: true`) are used. If none are available, Horizon explains why rather than using a cloud or unverified default voice. Voice availability depends on the browser and installed Windows voices. The installed Foundry Local 0.12.1 exposes transcription, but no verified local speech-synthesis interface; cloud Microsoft Foundry Speech is a different service and is not used. Text is split into bounded chunks; over-limit replies fail explicitly rather than being silently cut off.
+This is independent Windows/browser speech synthesis. Only voices the browser explicitly identifies as local (`localService: true`) are used. If none are available, Horizon explains why rather than using a cloud or unverified default voice. Voice availability depends on the browser and installed Windows voices. Text is split into bounded chunks; over-limit replies fail explicitly rather than being silently cut off. Horizon does not record microphone audio or provide dictation.
 
 ### Already extracted without unblocking?
 
@@ -147,15 +130,15 @@ Get-ChildItem -Recurse | Unblock-File
 .\scripts\Start-Horizon.ps1
 ```
 
-Same thing, but it also starts Foundry and pre-loads your model so the first message is quick.
+Use `Setup-Horizon.ps1` once to check prerequisites and prepare the configured Ollama model. The launcher can start Ollama when configured to do so and starts Horizon.
 
-Everything after that is managed from the page itself — starting and stopping the Foundry service, downloading and removing models, switching between them, and changing settings. You should not need a terminal again.
+Ollama is a separately owned service. Horizon's Stop action unloads the Horizon-selected model, but deliberately leaves Ollama running.
 
 ### Closing it properly
 
 Use the **power button** at the bottom of the left rail, or press `Ctrl+C` in the launcher window.
 
-This matters. A loaded model stays resident in the Foundry service — around 8.4 GB for phi-4 — and closing the browser tab alone will not release it. Closing safely unloads the model, optionally stops the Foundry service, and returns the memory. The browser will warn you if you try to close the tab while a model is still loaded.
+Closing the browser tab alone does not stop the Horizon server. Graceful shutdown unloads the Horizon-selected Ollama model; it does not stop Ollama or unload models owned by another Ollama client.
 
 ## The interface
 
@@ -168,11 +151,11 @@ A left rail holds everything, in the way you would expect from a modern chat app
 | **Memory** | Facts you want remembered across every chat, added to the model's instructions each time. Toggle it off whenever you like. |
 | **Library** | Replies you chose to keep, via **Save** under any answer. |
 | **Agents** | Configure local agent runs, tool permissions, workflows and schedules. |
-| **Connection** | The health of every hop, plus the air-gap indicator. |
+| **Connection** | The health of the Horizon, Ollama and model hops, plus the air-gap indicator. |
 | **Traffic** | What was sent and received, at a recording level you choose. |
 | **Settings** | Instructions, creativity, storage usage, and a single button to erase everything. |
 
-The model picker sits in the top bar. It lists every model on your machine with its hardware target and size; choosing one switches live, with no restart, keeping your conversation.
+The model picker sits in the top bar. It lists models available to Horizon through Ollama, with sizes when reported; choosing one switches live, with no restart, keeping your conversation.
 
 Light, dark, and match-Windows themes are in the top right. Your choice is remembered.
 
@@ -184,19 +167,44 @@ The browser-only **Erase all data** control deletes browser-stored chats and rel
 
 ### Agents and tool access
 
-**OpenClaw integration status:** OpenClaw is not bundled or connected. The permission-preserving broker and backend routing seam are retained, but no CLI/plugin adapter is wired. Runtime provisioning, adapter implementation and verified integration must happen in a permitted environment and follow device and organisation policies. Do not hand-enable the backend; no OpenClaw selector is exposed. Horizon's native engine is the supported default.
+**Runtime ownership:** Horizon's Node.js application owns orchestration, the LangGraph harness, run lifecycle, tool policy and human approvals. Ollama supplies local inference only. No external orchestrator or backend is used. The supplied OpenClaw archive is permitted only as source-text reference; it is not installed, launched or a runtime dependency.
 
 Live activity has distinct local animations for thinking, writing replies, reading/searching files, writing files, browser actions, commands and MCP calls. Tool states come from actual run events, not guesses about the prompt. Approval waits and finished/stopped/error states are still; reduced-motion preferences disable animations throughout these indicators. No GIF downloads, external animation services or additional dependencies are required.
 
-**Ordinary prompts can use tools too.** Open **Agents → Settings**, enable execution and the required feature flags, grant folders/configure trusted executables, and choose the tools under **Tools in the normal conversation**. Then just ask in the usual message box; no saved agent or separate run screen is required. Dictated text follows the same path after you send it. The composer shows **Tools available** when this is enabled, or **Tools off** otherwise.
+**Ordinary prompts can use tools too.** Open **Agents → Settings**, enable execution and the required feature flags, grant folders/configure trusted executables, and choose the tools under **Tools in the normal conversation**. Then just ask in the usual message box; no saved agent or separate run screen is required. The composer shows **Tools available** when this is enabled, or **Tools off** otherwise.
 
-Conversation tool calls show activity and exact approval previews alongside the reply. Read-only file tools use your folder grant; every other conversation tool needs a one-use approval, even if a saved agent has unattended permission for it. **Stop** cancels the conversation run; page closure also requests cancellation. Completed tool actions are not undone. Runs and results are recorded in **Agents → Activity**, including conversation tool runs; erasing browser chats alone does not remove that history. Settings changes cancel pending work.
+Conversation activity starts collapsed behind a chevron, preserving your expansion choice. Exact approval previews stay visible outside the collapsed details. Click **Tools available** (or **Tools off**) to review this conversation's approval preferences: allow reads within existing folder grants and public browsing/search, or ask each time. The choices are saved with that browser-stored conversation and never expand tool grants, roots or network access. The default allows granted file reads and public `browser_open`, `browser_snapshot`, `browser_search` and `browser_close` without repeated confirmation, as requested. Writes, commands, MCP calls, arbitrary clicks and fills still need one-use conversation approval; a model claiming a click is harmless changes nothing. Search uses only a fixed DuckDuckGo HTTPS GET URL, never arbitrary form submission. Submit/send, delete, reject and ambiguous clicks require confirmation. Existing grants do not automatically gain the newly added search tool: enable it explicitly in Agents settings.
 
-The default conversation protocol uses structured JSON actions to accommodate small local models; native tool calls are selectable for compatible models. Protocol errors are shown, never treated as successful actions. Conversation tools use a focused temperature of zero rather than the chat creativity slider. Conversation history is capped at 64 messages / 48,000 serialized JSON characters, with 20,000 characters per message; the complete tool context is capped at 64,000 characters and the model's token limit still applies. These are size limits, not cloud token charges.
+**Stop** cancels the conversation run; page closure also requests cancellation. Completed tool actions are not undone. Runs and results remain recorded in **Agents → Activity**, even after erasing browser chats. Settings changes cancel pending work.
+
+When a conversation needs you to interact with the visible browser or provide
+information before it can continue, Horizon records a **Waiting for you**
+handoff and returns control to the composer—there is no hidden background wait.
+For example, ask Horizon to open its viewport (no URL is needed), make your
+changes in the isolated Edge window, then send “check now” in the same
+conversation. After confirming the blank viewport is open, Horizon returns a
+ready message without another model call. Your next message starts a fresh run
+bound to the same conversation and browser, and Horizon reads the currently
+selected page before answering. The handoff is linked to that follow-up run in
+local history and carries a checkpoint of the original request and recent
+completed tool results capped at 8,000 characters. The latest user message
+remains controlling, permissions are revalidated, and completed side effects
+are not replayed automatically.
+Multi-step fixed workflows retain their results up to a 24,000-character cap.
+Restarting Horizon still interrupts unfinished runs and does not replay their
+actions or restore an ephemeral browser.
+
+Native conversations use the existing native function-call loop directly: the same model decision returns ordinary assistant text or a tool call. There is no extra JSON intent classifier, greeting keyword filter or mandatory plan, even when saved-agent planning is enabled. **Migration:** ordinary conversation protocol is normalized to native when loading/saving settings; saved agents retain their individual structured/native protocols and planning option. Persisted runs, history, folder grants and allowed-tool lists are preserved. No model or dependency is installed. Models still differ in tool reliability; errors are shown rather than fabricated as success. Tool-enabled conversations use temperature zero and a bounded 2,048-token response budget rather than the creativity slider. History is capped at 64 messages / 48,000 serialized JSON characters, with 20,000 characters per message; complete tool context is capped at 64,000 characters and the model's token limit still applies.
+
+Interactive browser tools open a **visible, dedicated isolated Microsoft Edge window per conversation** (requires installed Edge), retained across turns until `browser_close`, manual window closure, agent-data erasure or server shutdown. They follow manual navigation and the last selected tab, not a personal signed-in browser or general desktop. Separate conversations cannot read each other's tabs. `browser_snapshot` takes exactly `{}` and reads the selected page's URL, title and bounded text, including after manual navigation; it does not take screenshots. Stop interrupts the in-flight browser action by closing its tab, leaving other conversation tabs intact; close/reopen starts a fresh browser. Saved/scheduled tasks remain headless Chromium, isolated per run, and close on completion. Public HTTPS, private-address/DNS checks, the IP-validating proxy, blocked service workers/WebSockets and disabled downloads remain enforced. Generic clicks/fills require approval even for saved agents that previously preapproved them.
+
+Visible browser pages resize with the Edge window rather than using a fixed emulated viewport. Saved/headless tasks retain the default fixed viewport.
+
+Sites may challenge these fresh automated sessions. Using Edge does not guarantee CAPTCHA-free Google searches; Horizon neither bypasses challenges nor copies personal browser profiles. The opt-in `node tools/diagnose-browser-network.js` compares two fresh Edge sessions (direct and Horizon-guarded), with one Google search each, records failures/redirects and verifies private CONNECT rejection. It does not inspect existing personal/Scout sessions or interact with a challenge. Reports stay under `.runtime`.
 
 #### Experimental native planning and outcome checks
 
-**Agents → Settings → Plan and verify native tasks** is off by default. Leaving it off preserves the existing lightweight model/tool loop. Enabling it adds local inference for model-driven saved agents and conversation runs using Horizon's native engine (with either structured or native tool-call protocol). Fixed workflows and the inactive OpenClaw backend are unchanged.
+**Agents → Settings → Plan and verify native tasks** is off by default. It applies only to model-driven saved agents on the native engine, not ordinary conversations or fixed workflows. Saved agents retain either structured or native protocol; planning has its own explicit JSON contract.
 
 **Experimental and model-dependent:** JSON planning is not reliable on every local model. Some cached small models may misformat otherwise valid tasks, supply invalid write arguments, mix check parameters into tool arguments, or ask unnecessary clarification. The engine stops and reports problems rather than relaxing validation or verification checks. Successful execution with one compatible model does not establish general model reliability. Fixed workflows remain the predictable option when you already know the required tool arguments.
 
@@ -210,6 +218,8 @@ Run cards and inline conversation activity show the saved plan, individual step 
 
 Agents are off until enabled. The master switch and individual file, command, browser and MCP flags are separate controls; enabling a feature does not grant every tool. New agents start with read-only file tools. Review the agent's allowed tools and explicitly granted unattended tools before saving. Without fixed workflow steps, actions are model-driven; with steps, the saved sequence runs deterministically and does not ask the model to choose the next action. Steps are JSON objects of the form `{"tool":"file_list","args":{"path":"C:\\Users\\you\\Documents"}}`; file tool paths must be absolute paths under an approved root. The editor provides more argument examples. Each step's tool must also be on the agent's allowed-tools list, and workflow length cannot exceed the configured maximum (up to 32). A scheduled agent must have a default prompt or at least one fixed step. Model support varies, so neither protocol guarantees reliable actions.
 
+**Approval policy migration:** writes, commands, MCP calls and arbitrary browser clicks/fills now require exact human approval even for saved or scheduled agents with legacy unattended grants. Persisted grants/history are preserved, but unattended grants apply only to public read-only browser operations and MCP tool listings; granted file reads remain automatic. Scheduled side effects wait for approval and can time out rather than silently bypassing this policy.
+
 File tools can be limited to approved absolute roots. Command and MCP working directories (`cwd`) must also be existing directories under an approved root, but this starting-directory check does **not** sandbox commands, MCP servers or browser actions. Commands and MCP servers run configured trusted executables and can have unrestricted effects outside those roots. The browser uses a fresh isolated context, accesses public HTTPS only, is online, and cannot use personal browser sign-ins. It is not the browser profile Horizon is open in.
 
 Agent schedules are interval-based and persistent. They run only while the server and computer are awake; missed occurrences (including one over 30 seconds late after wake) and overlapping runs are skipped, and interrupted runs are not resumed or replayed. Re-enabling execution resets upcoming times instead of replaying missed schedules. The Agents panel shows server-computed upcoming run times and asks for approval when a run needs it. Run history is bounded to 100 runs / 16 MB, with at most 150 events per run and tool results capped at 12,000 characters. Agent context is limited to 64,000 serialized JSON characters, not tokens; the model's own token context limit also applies. Run the **Stop all** control to cancel active and queued runs and disable agent execution.
@@ -217,6 +227,8 @@ Agent schedules are interval-based and persistent. They run only while the serve
 Agents continue to use local model inference; enabling network-capable tools does not send inference to a cloud model. However, browser, command and MCP tools may use the network, so a tool-enabled session is **not an air-gap guarantee**. The Connection/privacy status distinguishes local inference from network-capable tools and reports whether external tools are enabled or have been used. Agent history records runs and tool events/results (bounded to 100 runs / 16 MB, with up to 150 events per run); it is **not a network audit log** and does not record every network request made by a command or MCP subprocess. There are no cloud API keys or cloud token charges for Agents; local model usage is still limited by the model's context window.
 
 The browser dependency is provisioned during one-time Horizon setup. MCP servers are external executables: install and maintain each trusted MCP server yourself before configuring it.
+
+**Local acceptance:** `npm test`, `npm run check` and `npm run build` exercise the existing offline regression suite and build. `npm run test:conversation` is separately opt-in: it requires the already-installed `qwen3:1.7b` at `http://127.0.0.1:11434`, Microsoft Edge for conversation browsing, and existing Chromium for the UI test driver. It launches visible isolated browsers and a separate Horizon server, uses synthetic files only, and performs actual local inference, public example-page browsing/search, approvals, cancellation and lifecycle checks. `node tools/validate-browser-followup.js` separately exercises the exact page-reading follow-ups with mistaken refusals in history, manually selected tabs, actual Google response/challenge reporting, unique synthetic page content and desktop/390px scroll pinning. Its UI response is synthetic; its page-reading model/tool calls are actual local Qwen. It installs/downloads nothing and does not change the normal server's grants or history. Results and screenshots stay under `.runtime`; this is representative acceptance, not a general model-reliability guarantee.
 
 ## Everyday use
 
@@ -249,7 +261,7 @@ Horizon only ever runs one server. If you click the shortcut while it is already
 
 **Links are a different matter, and worth understanding.**
 
-A model cannot open a link. Asked to summarise one, it reads the words in the address and writes plausible prose around them. Tested with a deliberately invented news URL, phi-4 produced a confident, detailed summary of an event that had never happened — including policy analysis. Nothing about the answer looked wrong.
+A model cannot open a link. Asked to summarise one, it reads the words in the address and writes plausible prose around them. In a historical check with a deliberately invented news URL, phi-4 produced a confident, detailed summary of an event that had never happened — including policy analysis. That example predates this Ollama-only update and is not runtime validation for it.
 
 So when you paste a link, Horizon says so:
 
@@ -277,18 +289,17 @@ This is off by default, and the file is readable without Horizon.
 
 The **?** button opens a page that separates three things people usually blur together:
 
-- **Horizon's chat and model path** collects no telemetry and talks to your local Foundry service. The request log, under Settings > Foundry, lets you inspect that traffic.
+- **Horizon's chat and model path** collects no telemetry and talks to the configured local Ollama endpoint. The request log lets you inspect that traffic.
 - **Agents** are an optional exception to the local-only network path: the browser tool can visit public HTTPS sites, and configured commands or MCP servers may have unrestricted external effects. Those activities are not represented in the chat request log or air-gap indicator.
-- **Foundry Local** is Microsoft's software. It reaches the internet for models and its catalogue. We observed no other outbound traffic while it sat idle or answered a message, but we cannot prove the absence of telemetry and do not claim to.
+- **Ollama** is a separately managed application. Check its own documentation for its model downloads and network behavior; Horizon's local request log does not audit Ollama itself.
 - **The model** has no network access of its own.
 
 ## Building on Horizon
 
-Start with [Vision](Vision/README.md): the public contributor and agent handoff
-covering where Horizon started, its current architecture, the proposed OpenClaw
-plumbing, concrete implementation work and acceptance criteria. It distinguishes
-shipped capabilities from unwired integration scaffolding so another contributor
-can build on or around Horizon without reconstructing the project's history.
+Start with [Vision](Vision/README.md): the public contributor handoff covering
+the Ollama-only runtime contract, Horizon-owned orchestration boundaries and
+isolated acceptance criteria. OpenClaw is not a runtime dependency; only
+selected source patterns inform Horizon's own code.
 
 ## Running the tests
 
@@ -296,50 +307,105 @@ can build on or around Horizon without reconstructing the project's history.
 npm test
 ```
 
-The regression suite runs entirely on this machine against a stub, so it needs no model, no GPU and no network. It covers config resolution, loopback enforcement, port fallback, path traversal, command injection, streaming, and behaviour when Foundry is not running.
+The documented regression commands are for future acceptance in an isolated
+environment. The Ollama-only source update has not been tested or built here;
+see [Vision/ACCEPTANCE.md](Vision/ACCEPTANCE.md) for the required gates.
 
 ### Horizon Native tool execution
 
-Horizon Native coordinates model decisions and permitted tools without an
-OpenClaw process or dependency. Choose **Native tool calls** for a model that
+Horizon Native uses a real, sequential **LangGraph.js StateGraph** to coordinate
+model decisions and permitted tools without an OpenClaw process. Choose **Native tool calls** for a model that
 supports function calling, or **Structured actions** for the JSON action
 protocol. The provider selection and the tool protocol are separate settings;
 the engine does not silently switch protocols or grant tools.
 
 Model actions are checked against the available tool schemas before execution.
-One format/schema correction is allowed per run, without replaying a tool.
+One shared format/schema/grounding/truncation correction is allowed per run,
+without replaying a tool. Each inference is limited to 2,048 output tokens;
+reasoning is discouraged (`/no_think` for compatible Qwen models), not given
+unlimited tokens. A second truncated or invalid decision fails explicitly.
 Permission failures, execution failures and budget exhaustion stop explicitly.
 Run activity and chat errors identify the failure stage. Exact-call approvals,
 cancellation and configured task limits still apply.
 
-The lightweight loop reports tool execution, not independent outcome
-verification. Enable **Plan and verify native tasks** when its bounded plans
-and readback checks fit the task. Neither mode guarantees a small model will
-choose the right action.
+The graph runs prepare → decide → validate → act → observe → verify → answer,
+with bounded transitions back to decide. It uses the Ollama HTTP adapter and
+serial inference queue, not another model, router, sidecar or hosted service.
+Pins: `@langchain/langgraph` **1.5.2**, `@langchain/core`
+**1.2.20**, and its `zod` peer **4.6.6**. Both native and structured dynamic
+runs use the graph. Fixed saved workflows and experimental **Plan and verify
+native tasks** keep their existing deterministic execution/readback paths.
 
-### Opt-in local-agent validation
+**Browser grounding is deliberately conservative.** Opening, clicking or filling
+returns metadata, not page evidence: the graph obtains a guarded snapshot
+afterward even if the model neglects to ask. An already-open conversation
+browser is freshly read before the next decision, including manual navigation
+and selected-tab changes. A final snapshot checks the selected page again.
+All these reads consume the same tool budget and respect your read approvals;
+navigation without the snapshot grant cannot produce a page answer. Opening
+just to show a page also collects bounded text; it does not click consent
+buttons or bypass challenges.
 
-`npm run test:local-agent` exercises experimental native planning against a real local model and can take several minutes. First load your chosen cached model yourself. Set the endpoint to your running Foundry service's actual loopback port and the model to its actual loaded ID from the cache list; replace both placeholders below:
+While a page is observed, answers are **extractive**, not free-form model
+summaries: the model selects an exact relevant excerpt (at most 2,000
+characters), checked against the freshly read text, and Horizon renders it
+with title/URL and an explicit provenance label. A fabricated value or false
+browser refusal fails this check, with at most one correction. An empty
+answer reports that the requested information could not be established.
+Matching text does **not** prove site truth, freshness of a publisher's data,
+relevance, or completeness: a model can still select an unrelated sidebar.
+Not-found pages and challenges are not the requested facts. Close the retained
+browser with `browser_close` when finished; otherwise subsequent turns continue
+to observe it and use this conservative page-answer mode.
 
-```powershell
-$env:HORIZON_AGENT_TEST_BASE_URL = "http://127.0.0.1:<actual-port>/v1"
-$env:HORIZON_AGENT_TEST_MODEL = "<actual-loaded-model-id-from-cache-list>"
-npm run test:local-agent
-```
+Snapshot context contains at most 8,000 page-text characters; omitted content
+is explicitly marked truncated. Recent model history is limited to 12 messages /
+16,000 serialized characters, within an overall 64,000-character ceiling.
+These are character limits, not promises about a model's token window.
+General non-browser replies remain unverified model text; other successful
+tool execution is not an independent outcome check.
 
-The test never loads or downloads models and does not change your real settings. It creates a synthetic temporary source file and isolated test settings, then asks the model to read the source, create a copy using a content result reference, and overwrite the source using a hash result reference. It checks the exact arguments before approving each write, verifies both writes through independent readback, checks that neither write was replayed, and cleans up its test files and state.
+Graph state lives only for the current run: there is no remote or persistent
+checkpointer and no duplicated long-lived model context. Existing run/history,
+events, approval UI, polling/SSE, cancellation and timeout persistence remain
+owned by AgentService. Restart marks unfinished runs interrupted; it does not
+resume graph nodes or replay effects. Restart also loses isolated browser
+contexts. Restart Horizon after installing this change; an already-running
+backend does not hot-reload it.
 
-Planning remains experimental and model-dependent: passing this bounded synthetic test is not a general reliability guarantee or proof that arbitrary user intent is fulfilled.
+No LangSmith callbacks or remote tracing are configured. To protect private
+prompts, graph execution fails **before supplying inputs** if inherited
+`LANGSMITH_TRACING`, `LANGCHAIN_TRACING_V2`, `LANGCHAIN_TRACING` or
+`LANGCHAIN_VERBOSE` is enabled. Horizon does not silently change your global
+environment. Unset those flags (or set them to `false`) in Horizon's launch
+environment. Transitive SDK packages do not imply hosted inference or a remote
+graph service is used.
 
-## The four scripts
+In an isolated acceptance environment, `node tools\validate-langgraph.js` is
+intended to run actual `qwen3:1.7b`/Ollama and isolated visible Edge acceptance
+on a separate ephemeral server, using
+controlled synthetic HTTPS fixtures (not live financial data or Google
+searches). It checks navigation→observation, manual tab changes, old false
+refusals and missing data, saving actual decisions and run evidence under
+`.runtime\langgraph-*`. It never restarts your regular backend, installs a
+model, or accesses personal browser profiles.
+
+### Isolated runtime acceptance
+
+Use the isolated gates in [Vision/ACCEPTANCE.md](Vision/ACCEPTANCE.md) after
+source plumbing is complete. They require Node.js 20+, Ollama, the selected
+model and controlled fixtures. No installation, test, build, inference or
+browser validation was performed for this update.
+
+## The five scripts
 
 | Script | What it does | When to run it |
 |---|---|---|
-| `Setup-Horizon.ps1` | Installs Foundry Local and downloads the model | Once per machine |
-| `Start-Horizon.ps1` | Starts everything and opens the chat page | Every time you want to chat |
-| `Optimize-Horizon.ps1` | Benchmarks your hardware and picks the fastest model | Once, or when replies feel slow |
-| `Test-Horizon.ps1` | Checks that all three pieces are healthy | When something seems wrong |
-| `Stop-Horizon.ps1` | Shuts everything down and frees memory | When you are done |
+| `Setup-Horizon.ps1` | Checks Node.js and Ollama, then downloads the configured model if needed | Once per machine |
+| `Start-Horizon.ps1` | Starts Horizon, may start Ollama when configured, and opens the chat page | Every time you want to chat |
+| `Optimize-Horizon.ps1` | Measures available models and can select a faster one | Once, or when replies feel slow |
+| `Test-Horizon.ps1` | Checks Horizon, Ollama and model availability | When something seems wrong |
+| `Stop-Horizon.ps1` | Stops Horizon and unloads its selected model; leaves Ollama running | When you are done |
 
 ## Making it fast
 
@@ -349,7 +415,7 @@ Run this to measure your own machine rather than guess:
 .\scripts\Optimize-Horizon.ps1 -Apply
 ```
 
-It inspects your CPU, GPU and NPU, checks which accelerated model variants Foundry can actually use, times a real completion for each downloaded model, and writes the winner to `config.local.json`. Add `-IncludeCandidates` to have it download and compare a couple of small, fast chat models too.
+It inspects your hardware and available Ollama models, measures candidates when supported, and can write the selected model to `config.local.json`. Add `-IncludeCandidates` only if you intend to download additional models. Optimizer behavior in this source-only update has not been runtime-validated.
 
 ### What actually affects speed
 
@@ -361,52 +427,52 @@ Some things are fixed by your hardware, and some are not.
 | **Model size** | The single biggest real lever. A 1.5B model is several times faster than a 14B one. | `Optimize-Horizon.ps1` finds the fastest |
 | **Reasoning models** | Models like `qwen3` "think out loud" before answering, spending hundreds of tokens first. Measured here: **1067 tokens to answer "say hello in five words"**. | Folded into a collapsible section; the optimiser prefers non-reasoning models |
 | **Warm-up** | The first completion after loading is much slower than the rest. | Done at startup, before you type |
-| **Keeping the model loaded** | If Foundry unloads the model, the next message pays the load cost again. | Optimiser disables the idle timeout |
+| **Keeping the model loaded** | If Ollama unloads the model, the next message pays the load cost again. | `ollama.keepAlive` controls the requested retention period |
 | **Conversation length** | Every message re-sends the history for reprocessing. Long chats get slower. | Capped by `chat.historyLimit`; the app tells you when older messages are dropped |
 | **Raw tokens per second** | Fixed by your GPU, CPU and memory bandwidth. Nothing in software changes this. | Not fixable, but measured and reported |
 
-### A note on ARM machines
+### Hardware and model performance
 
-On Snapdragon X Elite hardware, Windows reports an NPU, but Foundry Local 0.10.3 publishes **no NPU model variants** — every catalogue entry targets CPU, except `phi-4` which has a WebGPU variant. The NPU therefore sits idle. `Optimize-Horizon.ps1` detects this and says so plainly rather than letting you assume otherwise.
-
-Measured on a Snapdragon X Elite X1E80100:
-
-| Model | Backend | Tokens/second |
-|---|---|---|
-| `phi-4` (14B) | WebGPU (Adreno) | 6.1 |
-| `qwen3-1.7b` | CPU | 8.3 |
-
-At these rates streaming matters enormously: time to the first visible word was **1.1 seconds**, against 21.8 seconds for the complete reply.
+Performance depends on the selected Ollama model, its backend and your
+hardware. No optimizer benchmark is claimed for this source-only runtime
+update.
 
 ## How the pieces fit together
 
 ```text
 Your browser
   -> Node.js web server        (loopback only, port chosen at run time)
-  -> Foundry Local REST API    (loopback only, port chosen by Foundry)
+  -> Ollama native API         (loopback only, normally 127.0.0.1:11434)
   -> the model, on your hardware
 ```
 
-Your browser never talks to Foundry directly. It only talks to the small Node.js server in this folder, which passes the message along locally.
+Your browser never talks to Ollama directly. It only talks to the small Node.js server in this folder, which passes inference requests locally. Horizon owns the LangGraph harness and remains responsible for tool access, approvals and run state; the Human at the web UI is the authority.
 
 ## Configuration
 
-Every adjustable value lives in **`config.json`**. There is exactly one place to change any given setting.
+Default values live in **`config.json`**. Use the ignored `config.local.json`
+overlay or supported environment variables for machine-specific overrides.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `web.port` | `3000` | The address you open. If it is busy, Horizon moves to the next free port and says so. Set `0` to always let the system choose. |
 | `web.portSearchLimit` | `20` | If a pinned port is busy, how many ports upward to try before giving up. |
 | `web.openBrowser` | `true` | Open the browser automatically on start. |
-| `model.alias` | `phi-4` | Which Foundry model to load. Change this to use a different one. |
+| `provider` | `ollama` | The sole inference provider. |
+| `model.alias` | `qwen3:1.7b` | The selected Ollama model. |
+| `inference.requestTimeoutMs` | `120000` | Maximum time for an inference request. |
+| `inference.statusTimeoutMs` | `5000` | Maximum time for an Ollama status check. |
+| `inference.statusCacheMs` | `3000` | How long to reuse an Ollama status result. |
+| `inference.warmUpOnStart` | `true` | Send a bounded warm-up request at startup. |
+| `inference.warmUpTimeoutMs` | `300000` | Maximum time for startup warm-up. |
+| `ollama.baseUrl` | `null` | Ollama URL; default is native loopback `http://127.0.0.1:11434`. |
+| `ollama.keepAlive` | `30m` | Requested Ollama model retention period. |
+| `ollama.binary` | `null` | Optional Ollama executable path; otherwise resolve from `PATH`. |
+| `ollama.autoStart` | `true` | Whether Horizon's launcher may start Ollama when needed. |
 | `chat.systemPrompt` | *(see file)* | The instruction that shapes the model's personality. |
 | `chat.temperature` | `0.7` | Creativity. Lower is focused, higher is varied. |
 | `chat.historyLimit` | `30` | How many past messages are sent back to the model. |
 | `chat.stream` | `true` | Show words as they are produced. Turning this off makes replies feel much slower. |
-| `foundry.warmUpOnStart` | `true` | Send a throwaway request at startup so your first real message is quick. |
-| `foundry.unloadOnExit` | `true` | Release the model from memory when Horizon shuts down. |
-| `foundry.stopServiceOnExit` | `false` | Also stop the Foundry service on exit. See the note below. |
-| `foundry.requestTimeoutMs` | `120000` | How long to wait for a reply before giving up. |
 | `backup.enabled` | `false` | Keep a copy of your chats, prompts, memory and preferences on disk. |
 | `backup.directory` | *(your home folder)* | Where that copy is written. |
 | `reader.enabled` | `false` | Let Horizon fetch a page you paste and give the text to the model. |
@@ -416,30 +482,19 @@ Both `backup` and `reader` are off by default and are normally switched on from 
 
 ### Memory, and shutting down cleanly
 
-A loaded model stays resident in the Foundry service — it does **not** go away when you close the browser tab, and it would not go away when Horizon exited either. On this machine phi-4 alone accounts for around 8.4 GB.
-
-So Horizon releases what it loaded. Press `Ctrl+C`, or run `Stop-Horizon.ps1`, and you will see:
+A model may stay resident in Ollama after a browser tab or Horizon closes. Use the Horizon power button, `Ctrl+C`, or `Stop-Horizon.ps1` for graceful Horizon shutdown and to unload the model Horizon selected.
 
 ```text
 Shutdown request received. Shutting down...
-  Releasing phi-4 from memory... done
+  Releasing qwen3:1.7b from memory... done
   Goodbye.
 ```
 
-Only models **this instance loaded** are released, so a model you loaded yourself from the command line is left alone.
-
-One caveat worth knowing: unloading the model frees it inside the service, but the Foundry daemon keeps a large working set of its own. Measured here, the daemon still held 26.4 GB after the model was unloaded, and only stopping the service returned it — free memory went from 14.1 GB to 40.6 GB. If you want that memory back when you finish, either run `Stop-Horizon.ps1`, which stops the service, or set:
-
-```json
-"foundry": { "stopServiceOnExit": true }
-```
+Horizon deliberately does not stop Ollama, which may be shared with other applications. Stop Ollama from its own application only when you intend to stop that independently managed service.
 
 ### Ports are never hardcoded
 
-Both ports are decided while the program runs:
-
-- **Foundry Local** picks its own port and can change it between runs. The launcher reads the current one from `foundry server status`.
-- **The web server** defaults to `web.port: 0`, letting Windows hand it a free port. If you pin a port and it turns out to be occupied, it moves to the next free one and tells you it did so, rather than crashing.
+The web server can choose a free port at runtime or use a configured port. Ollama normally uses its native loopback address, `http://127.0.0.1:11434`; set `ollama.baseUrl` or `HORIZON_OLLAMA_URL` only to an approved loopback Ollama endpoint.
 
 The chosen values are written to `.runtime/horizon.json` while the app runs, so `Stop` and `Test` read them from there instead of guessing.
 
@@ -455,8 +510,8 @@ command-line argument  >  environment variable  >  config.local.json  >  config.
 # Pin a port for one run only
 .\scripts\Start-Horizon.ps1 -WebPort 3000
 
-# Try a completely different model
-.\scripts\Start-Horizon.ps1 -ModelAlias qwen2.5-0.5b
+# Try a different Ollama model
+.\scripts\Start-Horizon.ps1 -ModelAlias qwen2.5:0.5b
 
 # Start without opening a browser
 .\scripts\Start-Horizon.ps1 -NoBrowser
@@ -470,7 +525,7 @@ Click the panel icon in the top right. It has three tabs, and its purpose is to 
 
 ### Connection
 
-Shows the health of every hop in the chain — browser → local web server → Foundry service → model — each with its own state, address, and response time. When something breaks, you can see exactly which link failed instead of guessing.
+Shows the health of the local path — browser → Horizon web server → Ollama → selected model — each with its own state, address, and response time. When something breaks, you can see exactly which link failed instead of guessing.
 
 Above it sits the **air-gap indicator**. It detects connectivity **passively** from the browser's own signal; Horizon never makes an outbound request just to test for internet. This indicator describes the browser's connectivity, not whether an agent tool or configured program is attempting network access.
 
@@ -478,7 +533,9 @@ The same badge doubles as an **activity light** for Horizon's link-reading featu
 
 To be precise about what is happening: the **model** has no network access at all. Horizon fetches the page and hands the text over. The badge reports Horizon reaching out, not the model.
 
-Beneath it is a scope note: Horizon collects no telemetry and has no analytics, and it does not control Foundry Local or the model. The panel links to Microsoft's Foundry Local documentation so you can check how those handle the network yourself.
+Beneath it is a scope note: Horizon collects no telemetry and has no analytics.
+Ollama is a separately managed process; consult its own documentation for its
+network and privacy behavior.
 
 ### Traffic
 
@@ -494,7 +551,7 @@ Only the last 20 exchanges are kept, and each body is capped, so the page cannot
 
 ### Models
 
-Every model downloaded on this machine, with its hardware target and size. Switch between them with one click — no restart, and your conversation is kept. The model currently in use and any others still resident in memory are marked.
+Models available to Horizon through Ollama, with sizes when reported. Switch between them with one click — no restart, and your conversation is kept. The model currently in use and any others still resident in memory are marked.
 
 ## Trying things out
 
@@ -513,37 +570,49 @@ If the model thinks out loud before answering, that working is tucked into a **W
 
 Under the message box you get real numbers for each reply: how many tokens, how fast, and how long until the first words appeared.
 
-## Using Ollama instead of Foundry Local
+## Ollama runtime and model selection
 
-Horizon can run its models through Ollama, which accepts any model from its library or a GGUF from Hugging Face. Foundry Local stays the default.
+Ollama is Horizon's only inference provider. Install Ollama separately from
+[ollama.com/download](https://ollama.com/download); Horizon does not install or
+replace its service. The default configuration selects `qwen3:1.7b`. Setup
+prepares the configured model; use Ollama's own CLI to pull another model when
+needed:
 
 ```powershell
-winget install Ollama.Ollama
-# config.local.json
-{ "provider": "ollama", "model": { "alias": "llama3.2:3b" } }
+ollama pull qwen3:1.7b
 ```
 
-Or for one run: `.\scripts\Start-Horizon.ps1 -Provider ollama`, `--provider ollama`, or `HORIZON_PROVIDER=ollama`.
-
-| Setting | Env var | Default |
+| Setting | Environment variable | Default |
 |---|---|---|
-| `ollama.baseUrl` | `HORIZON_OLLAMA_URL` | `http://127.0.0.1:11434` (loopback only) |
-| `ollama.keepAlive` | `HORIZON_OLLAMA_KEEP_ALIVE` | `30m` |
-| `ollama.binary` | `HORIZON_OLLAMA_BINARY` | found on PATH |
-| `ollama.autoStart` | `HORIZON_OLLAMA_AUTOSTART` | `true` |
+| `provider` | — | `ollama` |
+| `model.alias` | `HORIZON_MODEL_ID` | `qwen3:1.7b` |
+| `ollama.baseUrl` | `HORIZON_OLLAMA_URL` | `http://127.0.0.1:11434` |
+| `ollama.keepAlive` | — | `30m` |
+| `ollama.binary` | — | Resolve `ollama` from `PATH` |
+| `ollama.autoStart` | — | `true` |
+| `inference.*` | — | Shared request/status timeouts, status cache and startup warm-up |
 
-In Settings, the runtime section has a box to pull any model by name. On a CPU-only machine with 8 GB of RAM, use 1B to 4B models. Small models can be unreliable at the tool-call JSON that agents need.
+`HORIZON_MODEL_ID` replaces the former Foundry model environment variable.
+`HORIZON_OLLAMA_URL` must refer to the native loopback Ollama service; Horizon's
+web server and inference endpoint are distinct. Model size and tool-following
+quality vary; the selected model does not make agent behavior reliable by
+itself. Horizon-specific Ollama endpoints are under `/api/ollama/*`; the former
+`/api/foundry*` surface is not part of this runtime.
 
-Limits: dictation and the Setup, Optimize and Test scripts are Foundry-only. Horizon's native agent loop and optional task planning use whichever model runtime is selected. The proposed OpenClaw path remains disconnected and is not included in this branch.
+Dictation and microphone recording are not provided. Independent local
+Windows/browser read-aloud remains available when the browser exposes a
+verified local voice. No OpenClaw runtime is installed or executed; only
+selected source patterns inform Horizon's own harness.
 
 ## Using a different model
 
-The code contains no model-specific logic. Download another Foundry model and point at it:
+The code contains no model-specific inference provider. Pull another Ollama model and select it:
 
 ```powershell
-foundry model list
-.\scripts\Setup-Horizon.ps1 -ModelAlias qwen2.5-0.5b
-.\scripts\Start-Horizon.ps1 -ModelAlias qwen2.5-0.5b
+ollama list
+ollama pull qwen2.5:0.5b
+.\scripts\Setup-Horizon.ps1 -ModelAlias qwen2.5:0.5b
+.\scripts\Start-Horizon.ps1 -ModelAlias qwen2.5:0.5b
 ```
 
 To make the change permanent, edit `model.alias` in `config.json`.
@@ -552,14 +621,14 @@ To make the change permanent, edit `model.alias` in `config.json`.
 
 ### What Horizon promises
 
-With Agents disabled and link reading off, Horizon's chat/model requests go to `127.0.0.1`, and the request log under Settings > Foundry shows those requests. Agents can access public HTTPS pages; configured commands and MCP servers can also perform external network activity. That activity is not covered by the chat request log or air-gap indicator. Disable Agents and do not run externally connected tools when you need a genuinely offline session. Horizon collects **no telemetry** and has **no analytics**.
+With Agents disabled and link reading off, Horizon's chat/model requests go to the configured loopback Ollama endpoint, and the request log shows the local chat path. Agents can access public HTTPS pages; configured commands and MCP servers can also perform external network activity. That activity is not covered by the chat request log or air-gap indicator. Disable Agents and do not run externally connected tools when you need a genuinely offline session. Horizon collects **no telemetry** and has **no analytics**.
 
-It does not control Foundry Local or the model itself — those are separate processes. For how they handle the network, check your Foundry configuration and [Microsoft's documentation](https://learn.microsoft.com/en-us/azure/foundry-local/).
+Ollama is a separately managed process. Horizon may start it when `ollama.autoStart` is enabled and unloads the model selected by Horizon at shutdown, but does not stop the Ollama service.
 
 ### Verifying it
 
 1. While connected, run `Setup-Horizon.ps1` and let the download finish.
-2. Confirm the model is cached: `foundry model list --cached`
+2. Confirm the model is available: `ollama list`
 3. Run `Start-Horizon.ps1` and send a message to prove it works.
 4. Disconnect the network, or apply your organisation's approved isolation.
 5. Run `Start-Horizon.ps1` again. It should still answer.
@@ -575,7 +644,7 @@ config.json               every adjustable setting, in one place
 package.json              project metadata; `npm start` runs the server
 src/config.js             merges config file, environment, and CLI arguments
 src/net.js                loopback checks and free-port selection
-src/foundry.js            Foundry discovery, model control, streaming, timeouts
+src/ollama.js              Ollama connectivity, model access and inference
 src/runtime.js            records the live port, endpoint, model, and process ID
 src/desktop.js            shortcuts, and starting at sign-in
 src/backup.js             the optional copy of your data on disk
@@ -604,13 +673,11 @@ scripts/*.ps1             Setup, Start, Optimize, Test, Stop
 
 ## Credits
 
-An independent front end for Microsoft Foundry Local.
+An independent local assistant using Ollama for inference.
 
 UI/UX connector designed by **Tejaswi**.
 
 Icons are from [Fluent System Icons](https://github.com/microsoft/fluentui-system-icons) (MIT). See `NOTICE`.
-
-Microsoft, Azure, Foundry and Foundry Local are trademarks of the Microsoft group of companies, used here only to name the software Horizon connects to. Horizon is not a Microsoft product and is not affiliated with or endorsed by Microsoft. Foundry Local is separate software with its own [licence and privacy terms](https://learn.microsoft.com/en-us/azure/foundry-local/).
 
 ## Interface notes
 
@@ -625,20 +692,18 @@ Microsoft, Azure, Foundry and Foundry Local are trademarks of the Microsoft grou
 ## Design notes
 
 - The web server binds only to a loopback address and refuses anything else.
-- The launcher refuses a Foundry endpoint that is not on loopback.
+- Horizon accepts only an approved loopback Ollama inference endpoint.
 - Static files are served from `public/` only, with directory traversal blocked.
 - The Content-Security-Policy allows no inline scripts or styles, and no external origins.
-- Requests to Foundry carry a timeout, and abort automatically if you navigate away or press stop mid-reply.
-- If Foundry restarts on a different port mid-session, Horizon re-discovers it and reconnects on its own.
-- `/api/status` and `/api/diagnostics` genuinely query Foundry rather than assuming everything is fine.
+- Ollama requests use shared `inference.*` timeouts; `/api/ollama/*` provides the Ollama-specific service surface.
 - Model names sent from the browser are validated against a strict pattern and passed as separate process arguments, never interpolated into a shell string.
 - The air-gap indicator is passive; it never makes a network request.
-- The air-gap indicator and Foundry request log cover the chat/model path, not network activity initiated by Agents, commands or MCP servers.
+- The air-gap indicator and request log cover the chat/model path, not network activity initiated by Agents, commands or MCP servers.
 - Agent definitions and run history are stored server-side in local runtime data and may contain private prompts and tool results.
 - The conversation lives in the browser tab's memory and is never written to disk.
 - No analytics, telemetry, remote fonts or CDN assets. The base chat UI uses local assets; agent browser execution relies on a separately provisioned browser dependency.
 
-> Foundry Local and its REST API are preview features. Review the Microsoft documentation before relying on this for production workloads.
+> This Ollama-only runtime is source-plumbed but has not yet passed isolated runtime acceptance. Do not rely on it for production workloads until the required acceptance is complete.
 
 ## Licence
 

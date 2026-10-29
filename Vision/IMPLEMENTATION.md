@@ -5,14 +5,19 @@
 1. Read this folder, the project README and current source. Check the branch,
    dirty files and upstream changes before editing.
 2. Run the existing build, checks and regression suite. Preserve user changes.
-3. Decide whether the work improves the supported native engine or implements
-   the optional OpenClaw backend; do not blur their release status.
+3. Keep all orchestration and lifecycle inside Horizon's Node.js service;
+   Ollama supplies local inference only.
 4. Confirm the runtime and dependencies are permitted in the target environment.
    Do not use another registry, archive, assistant or folder to evade a block.
-5. Implement against a specific verified upstream version, then meet
-   [ACCEPTANCE.md](ACCEPTANCE.md) before exposing the backend.
+5. Meet [ACCEPTANCE.md](ACCEPTANCE.md) before claiming runtime continuity.
 
-## OpenClaw: remaining work
+## Historical external-runtime proposal — excluded
+
+The former integration notes below are retained only as historical context;
+they are not implementation instructions. Horizon does not install, execute,
+depend on, or route work through OpenClaw or another external orchestrator.
+The supplied archive is source-text reference only. Legacy external-backend
+settings normalize to the Horizon Native runtime.
 
 ### 1. Establish a version-correct runtime contract
 
@@ -92,12 +97,12 @@ Document installation, cleanup, supported versions/platforms, local inference,
 network-capable tools, storage, permissions and known limitations. Keep feature
 claims consistent across the README, landing page, settings and this folder.
 
-## Building around Horizon instead
+## Keep the execution authority in Horizon
 
-Another orchestration backend can implement the existing callback seam, but
-its semantics must be documented and tested rather than pretending to be
-OpenClaw. Generalising backend validation is an intentional code change;
-the current settings accept only `native` and `openclaw`.
+There is no external orchestration callback seam. The Horizon-owned native
+runtime validates model decisions, enforces grants and approvals, records
+events, and handles cancellation and cleanup. Do not introduce a second
+execution authority.
 
 New tools require schema validation, feature gating, explicit grants, correct
 approval treatment, cancellation, bounded results and tests. Do not register a

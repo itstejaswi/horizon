@@ -15,6 +15,8 @@ const MAX_COMMAND_BYTES = 32 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
 const browserRuns = new Map();
 const browserRunSet = new Set();
+const conversationBrowsers = new Map();
+const conversationBindings = new WeakMap();
 
 const schemas = {
   file_list: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false },
@@ -32,8 +34,9 @@ const schemas = {
     additionalProperties: false
   },
   command_run: { type: "object", properties: { commandId: { type: "string" } }, required: ["commandId"], additionalProperties: false },
-  browser_open: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
-  browser_snapshot: { type: "object", properties: {}, additionalProperties: false },
+  browser_open: { type: "object", properties: { url: { type: "string" } }, additionalProperties: false },
+  browser_search: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false },
+  browser_snapshot: { type: "object", description: "Read the current page with an empty argument object {}. No selector, URL or tab ID.", properties: {}, additionalProperties: false },
   browser_click: { type: "object", properties: { selector: { type: "string" } }, required: ["selector"], additionalProperties: false },
   browser_fill: {
     type: "object",
@@ -61,8 +64,9 @@ const descriptions = {
   file_search: "Search bounded text files recursively under an approved root.",
   file_write: "Create a bounded UTF-8 text file under an approved root using path and content only. To overwrite an existing file, also provide overwrite=true and its current SHA-256 from file_read.",
   command_run: "Run one preconfigured command by id; its executable, arguments and working directory cannot be supplied by the model.",
-  browser_open: "Open a public HTTPS page in an isolated ephemeral browser. Public network access is routed through an IP-validating proxy; private/internal and non-HTTPS requests are blocked.",
-  browser_snapshot: "Return bounded visible text from the current browser page.",
+  browser_open: "Open a public HTTPS page in a dedicated isolated browser (visible and retained across turns in a conversation; headless for saved tasks). Omit url (or use an empty string) to open a blank viewport for the user to navigate manually; use horizon_handoff to yield control. Not your personal signed-in browser. Public network access uses an IP-validating proxy; private/internal and non-HTTPS requests are blocked.",
+  browser_snapshot: "Read the current selected page in this conversation's retained browser, including after the human manually navigates or switches tabs. Returns the current URL, title and bounded visible text, not a screenshot. Call with exactly {} (no selector or URL). Use this to answer what is open or read the current page; do not reopen the previous URL.",
+  browser_search: "Search the public web with a bounded query using a fixed HTTPS DuckDuckGo GET URL. Returns the results page text. Never submits arbitrary forms or clicks buttons.",
   browser_click: "Click the first element matching a CSS selector on the current page.",
   browser_fill: "Fill a form field matching a CSS selector on the current page.",
   browser_close: "Close and discard the current isolated browser session.",
@@ -81,7 +85,7 @@ function definitions(settings = {}) {
     output.push(...["file_list", "file_read", "file_search", "file_write"].map(tool));
   }
   if (flags.commands === true && Array.isArray(settings.commands) && settings.commands.length) output.push(tool("command_run"));
-  if (flags.browser === true) output.push(...["browser_open", "browser_snapshot", "browser_click", "browser_fill", "browser_close"].map(tool));
+  if (flags.browser === true) output.push(...["browser_open", "browser_search", "browser_snapshot", "browser_click", "browser_fill", "browser_close"].map(tool));
   if (flags.mcp === true && Array.isArray(settings.mcpServers) && settings.mcpServers.length) {
     output.push(tool("mcp_list_tools"), tool("mcp_call_tool"));
   }
@@ -584,13 +588,17 @@ async function startPublicProxy() {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
   });
+  let closing;
   return {
     server,
     sockets,
     address: `http://127.0.0.1:${server.address().port}`,
     async close() {
-      for (const socket of sockets) socket.destroy();
-      await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      if (!closing) {
+        for (const socket of sockets) socket.destroy();
+        closing = new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      }
+      await closing;
     }
   };
 }
@@ -598,6 +606,16 @@ async function startPublicProxy() {
 function currentBrowserRun(signal) {
   if (!signal || typeof signal.addEventListener !== "function" || typeof signal.aborted !== "boolean") {
     throw new Error("Browser tools require the AbortSignal for the current agent run");
+  }
+  const conversationId = conversationBindings.get(signal);
+  if (conversationId) {
+    if (!conversationBrowsers.has(conversationId)) {
+      if (conversationBrowsers.size >= 8) throw new Error("Eight conversation browsers are open. Close one with browser_close before opening another.");
+      const run = { key: conversationId, visible: true, browser: null, context: null, page: null, proxy: null, pending: null, closing: null };
+      conversationBrowsers.set(conversationId, run);
+      browserRunSet.add(run);
+    }
+    return conversationBrowsers.get(conversationId);
   }
   if (!browserRuns.has(signal)) {
     const run = { key: signal, browser: null, context: null, page: null, proxy: null, pending: null, closing: null };
@@ -621,7 +639,8 @@ async function ensureBrowser(run) {
     try {
       const { chromium } = require("playwright");
       browser = await chromium.launch({
-        headless: true,
+        headless: !run.visible,
+        ...(run.visible ? { channel: "msedge" } : {}),
         proxy: { server: proxy.address, bypass: "<-loopback>" },
         args: [
           "--disable-background-networking",
@@ -633,7 +652,21 @@ async function ensureBrowser(run) {
           "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
         ]
       });
-      const context = await browser.newContext({ serviceWorkers: "block", acceptDownloads: false });
+      const context = await browser.newContext({
+        serviceWorkers: "block",
+        acceptDownloads: false,
+        ...(run.visible ? { viewport: null } : {})
+      });
+      if (run.visible) {
+        await context.exposeBinding("__horizonPageFocused", ({ page }) => { run.page = page; });
+        await context.addInitScript(() => {
+          const remember = () => {
+            if (document.visibilityState === "visible") window.__horizonPageFocused().catch(() => {});
+          };
+          window.addEventListener("focus", remember);
+          document.addEventListener("visibilitychange", remember);
+        });
+      }
       await context.route("**/*", async route => {
         let url;
         try {
@@ -654,6 +687,16 @@ async function ensureBrowser(run) {
       run.browser = browser;
       run.context = context;
       run.page = await context.newPage();
+      context.on("page", page => {
+        run.page = page;
+        prepareVisiblePage(run, page).catch(error => process.emitWarning(error.message));
+      });
+      await prepareVisiblePage(run, run.page);
+      if (run.visible) {
+        browser.on("disconnected", () => {
+          closeBrowserRun(run).catch(error => process.emitWarning(error.message));
+        });
+      }
       return run;
     } catch (error) {
       const cleanupErrors = [];
@@ -662,8 +705,11 @@ async function ensureBrowser(run) {
       if (cleanupErrors.length) {
         throw new AggregateError([error, ...cleanupErrors], "Browser startup failed and resources could not be fully closed");
       }
-      if (/Executable doesn't exist|browserType.launch/i.test(error.message)) {
-        throw new Error(`Playwright Chromium is not installed. Run "npx playwright install chromium" in the Horizon project. ${error.message}`);
+      if (/Executable doesn't exist|distribution .*not found|executable.*doesn't exist/i.test(error.message)) {
+        const installation = run.visible
+          ? 'Microsoft Edge is required for the visible isolated browser. Install Microsoft Edge, then reopen the conversation browser.'
+          : 'Playwright Chromium is not installed. Run "npx playwright install chromium" in the Horizon project.';
+        throw new Error(`${installation} ${error.message}`);
       }
       throw error;
     }
@@ -688,6 +734,7 @@ function closeBrowserRun(run) {
     run.page = null;
     run.proxy = null;
     if (browserRuns.get(run.key) === run) browserRuns.delete(run.key);
+    if (conversationBrowsers.get(run.key) === run) conversationBrowsers.delete(run.key);
     browserRunSet.delete(run);
     if (errors.length) throw new Error(`Unable to fully close browser session: ${errors.map(error => error.message).join("; ")}`);
   })();
@@ -695,8 +742,18 @@ function closeBrowserRun(run) {
 }
 
 async function browserOpen(args, signal) {
-  ensureArgs(args, ["url"]);
-  const urlText = stringArg(args.url, "url", 4096);
+  ensureArgs(args, [], ["url"]);
+  const urlText = args.url === undefined ? "" : stringArg(args.url, "url", 4096);
+  if (!urlText.trim()) {
+    const current = currentBrowserRun(signal);
+    if (!current.visible) throw new Error("Opening a blank manual viewport is available only in an interactive conversation.");
+    const run = await ensureBrowser(current);
+    signal.throwIfAborted();
+    const page = await activePage(run, true);
+    signal.throwIfAborted();
+    await page.bringToFront();
+    return { ...(await pageState(page)), visible: true, isolated: true, retainedAcrossTurns: true, readyForUser: true };
+  }
   let url;
   try {
     url = new URL(urlText);
@@ -712,8 +769,95 @@ async function browserOpen(args, signal) {
     throw new Error(`browser_open requires a public HTTPS URL: ${error.message}`);
   }
   const run = await ensureBrowser(currentBrowserRun(signal));
-  await run.page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 20_000 });
-  return pageState(run.page);
+  signal.throwIfAborted();
+  const page = await activePage(run, true);
+  signal.throwIfAborted();
+  await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 20_000 });
+  return { ...(await pageState(page)), visible: !!run.visible, isolated: true, retainedAcrossTurns: !!run.visible };
+}
+
+async function prepareVisiblePage(run, page) {
+  if (!run.visible) return;
+  if (!run.pageSetup) run.pageSetup = new WeakMap();
+  if (!run.pageSetup.has(page)) {
+    run.pageSetup.set(page, (async () => {
+      // Playwright emulates focus on every page, even in a visible window.
+      // Disable that emulation so manual tab selection is actually observable.
+      // The override belongs to Playwright's owning CDP session; a public
+      // newCDPSession cannot clear it. This adapter is pinned to Playwright 1.55.1
+      // and fails closed if its local implementation changes.
+      const session = page._connection?.toImpl?.(page)?.delegate?._mainFrameSession?._client;
+      if (!session || typeof session.send !== "function") {
+        throw new Error("Visible browser tab tracking is unavailable with this Playwright build.");
+      }
+      await session.send("Emulation.setFocusEmulationEnabled", { enabled: false });
+    })());
+  }
+  return run.pageSetup.get(page);
+}
+
+async function activePage(run, create = false) {
+  if (run.page?.isClosed()) run.page = null;
+  if (run.visible && run.context) {
+    for (const page of run.context.pages()) {
+      if (page.isClosed()) continue;
+      await prepareVisiblePage(run, page);
+      if (!page.isClosed() && await page.evaluate(() => document.hasFocus()).catch(() => false)) {
+        run.page = page;
+        break;
+      }
+    }
+  }
+  if (!run.page && run.context) run.page = run.context.pages().filter(page => !page.isClosed()).at(-1) || null;
+  if (!run.page && create && run.context) run.page = await run.context.newPage();
+  if (!run.page) throw new Error("No browser page is open; call browser_open first");
+  if (run.operation) run.operation.page = run.page;
+  return run.page;
+}
+
+function bindConversation(signal, conversationId) {
+  if (!signal || typeof signal.addEventListener !== "function" ||
+      typeof conversationId !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(conversationId)) {
+    throw new Error("A valid signal and conversation ID are required.");
+  }
+  conversationBindings.set(signal, conversationId);
+}
+
+async function browserState(signal) {
+  signal.throwIfAborted();
+  const conversationId = conversationBindings.get(signal);
+  const run = conversationId ? conversationBrowsers.get(conversationId) : browserRuns.get(signal);
+  if (!run?.context) return { open: false, conversationId: conversationId || null, isolated: true };
+  const pages = run.context.pages().filter(page => !page.isClosed());
+  if (!pages.length) return { open: false, conversationId: conversationId || null, isolated: true };
+  const page = await activePage(run);
+  return { open: true, conversationId: conversationId || null, isolated: true, tabs: pages.length, ...(await pageState(page)) };
+}
+
+async function browserOperation(signal, action) {
+  signal?.throwIfAborted();
+  const run = currentBrowserRun(signal);
+  const starting = !run.context;
+  const operation = { page: null };
+  run.operation = operation;
+  let cancellation;
+  // Playwright actions have no AbortSignal option. Closing the active tab
+  // interrupts an in-flight action without discarding the conversation window.
+  const abort = () => {
+    cancellation = (operation.page || run.page)?.close().catch(error => process.emitWarning(error.message));
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    const result = await action();
+    signal.throwIfAborted();
+    return result;
+  } finally {
+    signal.removeEventListener("abort", abort);
+    await cancellation;
+    if (run.operation === operation) delete run.operation;
+    // Cancellation during startup can happen before a tab exists to close.
+    if (signal.aborted && starting || !run.context && !run.pending) await closeBrowserRun(run);
+  }
 }
 
 async function pageState(page) {
@@ -729,8 +873,9 @@ async function pageState(page) {
 
 async function browserSnapshot(signal) {
   const run = currentBrowserRun(signal);
-  if (!run.page) throw new Error("No browser page is open; call browser_open first");
-  const content = await run.page.locator("body").evaluate((body, maxChars) => {
+  const page = await activePage(run);
+  signal.throwIfAborted();
+  const content = await page.locator("body").evaluate((body, maxChars) => {
     const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
     let text = "";
     let visited = 0;
@@ -756,16 +901,17 @@ async function browserSnapshot(signal) {
     }
     return { text, truncated };
   }, 20_000, { timeout: 5_000 });
-  return { ...(await pageState(run.page)), ...content };
+  return { ...(await pageState(page)), ...content };
 }
 
 async function browserClick(args, signal) {
   ensureArgs(args, ["selector"]);
   const selector = stringArg(args.selector, "selector", 2048);
   const run = currentBrowserRun(signal);
-  if (!run.page) throw new Error("No browser page is open; call browser_open first");
-  await run.page.locator(selector).first().click({ timeout: 5_000 });
-  return pageState(run.page);
+  const page = await activePage(run);
+  signal.throwIfAborted();
+  await page.locator(selector).first().click({ timeout: 5_000 });
+  return pageState(page);
 }
 
 async function browserFill(args, signal) {
@@ -773,8 +919,9 @@ async function browserFill(args, signal) {
   const selector = stringArg(args.selector, "selector", 2048);
   const value = stringArg(args.value, "value", 4096);
   const run = currentBrowserRun(signal);
-  if (!run.page) throw new Error("No browser page is open; call browser_open first");
-  await run.page.locator(selector).first().fill(value, { timeout: 5_000 });
+  const page = await activePage(run);
+  signal.throwIfAborted();
+  await page.locator(selector).first().fill(value, { timeout: 5_000 });
   return { filled: true };
 }
 
@@ -806,14 +953,22 @@ async function execute(name, args, settings = {}, signal) {
     case "file_search": return fileSearch(args, settings);
     case "file_write": return fileWrite(args, settings);
     case "command_run": return runCommand(args, settings, signal);
-    case "browser_open": return browserOpen(args, signal);
-    case "browser_snapshot": ensureArgs(args, []); return browserSnapshot(signal);
-    case "browser_click": return browserClick(args, signal);
-    case "browser_fill": return browserFill(args, signal);
+    case "browser_open": return browserOperation(signal, () => browserOpen(args, signal));
+    case "browser_search": {
+      ensureArgs(args, ["query"]);
+      const query = stringArg(args.query, "query", 512);
+      if (!query.trim()) throw new Error("Search query must not be empty");
+      return browserOperation(signal, async () => {
+        await browserOpen({ url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}` }, signal);
+        return browserSnapshot(signal);
+      });
+    }
+    case "browser_snapshot": ensureArgs(args, []); return browserOperation(signal, () => browserSnapshot(signal));
+    case "browser_click": return browserOperation(signal, () => browserClick(args, signal));
+    case "browser_fill": return browserOperation(signal, () => browserFill(args, signal));
     case "browser_close": {
       ensureArgs(args, []);
-      currentBrowserRun(signal);
-      const run = browserRuns.get(signal);
+      const run = currentBrowserRun(signal);
       if (run) await closeBrowserRun(run);
       return { closed: true };
     }
@@ -848,6 +1003,7 @@ async function closeRun(signal) {
     throw new Error("closeRun requires the AbortSignal used for this agent run");
   }
   const run = browserRuns.get(signal);
+  conversationBindings.delete(signal);
   const results = await Promise.allSettled([
     run ? closeBrowserRun(run) : Promise.resolve(),
     agentMcp.closeRun(signal)
@@ -858,4 +1014,4 @@ async function closeRun(signal) {
   }
 }
 
-module.exports = { definitions, execute, closeRun, close };
+module.exports = { definitions, execute, bindConversation, browserState, closeRun, close };

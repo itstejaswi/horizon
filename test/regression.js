@@ -4,7 +4,7 @@
  *
  *   npm test
  *
- * Runs entirely on this machine against a stub Foundry, so it needs no model,
+ * Runs entirely on this machine against a stub Ollama, so it needs no model,
  * no GPU and no network. It covers the parts that have actually broken during
  * development: config resolution, port fallback, path traversal, command
  * injection, streaming, and honest readiness reporting.
@@ -20,9 +20,12 @@ const { test } = require("node:test");
 
 const ROOT = path.join(__dirname, "..");
 
-/* ------------------------------------------------------------ stub foundry -- */
+/* ------------------------------------------------------------- stub ollama -- */
 
-function startStubFoundry() {
+function startStubOllama() {
+  const calls = [];
+  const resident = new Set();
+  const models = [{ name: "stub-model", size: 1024, details: {} }];
   return new Promise(resolve => {
     const server = http.createServer((req, res) => {
       const url = (req.url || "").split("?")[0];
@@ -32,8 +35,26 @@ function startStubFoundry() {
         res.end(data);
       };
 
+      if (req.method === "GET" && url === "/api/version") return json(200, { version: "0.6.1" });
+      if (req.method === "GET" && url === "/api/tags") return json(200, { models });
+      if (req.method === "GET" && url === "/api/ps") {
+        return json(200, { models: [...resident].map(name => ({ name, size_vram: 0 })) });
+      }
       if (req.method === "GET" && url === "/v1/models") {
-        return json(200, { data: [{ id: "stub-model", parent: "stub" }] });
+        return json(200, { data: models.map(model => ({ id: model.name })) });
+      }
+
+      if (req.method === "POST" && url === "/api/generate") {
+        let raw = "";
+        req.on("data", chunk => { raw += chunk; });
+        return req.on("end", () => {
+          const body = JSON.parse(raw || "{}");
+          calls.push({ method: req.method, url, body });
+          if (!models.some(model => model.name === body.model)) return json(404, { error: "model not found" });
+          if (body.keep_alive === 0) resident.delete(body.model);
+          else resident.add(body.model);
+          return json(200, { model: body.model, response: "", done: true });
+        });
       }
 
       if (req.method === "POST" && url === "/v1/chat/completions") {
@@ -41,6 +62,9 @@ function startStubFoundry() {
         req.on("data", chunk => { raw += chunk; });
         return req.on("end", () => {
           const body = JSON.parse(raw || "{}");
+          calls.push({ method: req.method, url, body });
+          if (!models.some(model => model.name === body.model)) return json(404, { error: "model not found" });
+          resident.add(body.model);
 
           if (!body.stream) {
             return json(200, {
@@ -63,7 +87,7 @@ function startStubFoundry() {
       json(404, { error: "stub: not found" });
     });
 
-    server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port }));
+    server.listen(0, "127.0.0.1", () => resolve({ server, calls, resident, port: server.address().port }));
   });
 }
 
@@ -115,9 +139,11 @@ async function stop(app) {
 const request = (url, options = {}) => fetch(url, options);
 
 const stubEnv = port => ({
-  FOUNDRY_BASE_URL: `http://127.0.0.1:${port}/v1`,
-  FOUNDRY_MODEL_ID: "stub-model",
-  HORIZON_MODEL_ALIAS: "stub",
+  HORIZON_PROVIDER: "ollama",
+  HORIZON_OLLAMA_URL: `http://127.0.0.1:${port}`,
+  HORIZON_MODEL_ID: "stub-model",
+  HORIZON_MODEL_ALIAS: "stub-model",
+  HORIZON_OLLAMA_AUTOSTART: "false",
   HORIZON_PORT: "0",
   HORIZON_OPEN_BROWSER: "false",
   HORIZON_WARM_UP: "false",
@@ -129,10 +155,15 @@ const stubEnv = port => ({
 
 /* ------------------------------------------------------------------ tests -- */
 
-test("config: resolution order and validation", () => {
-  const { loadConfig } = require(path.join(ROOT, "src", "config.js"));
+test("config: resolution order and validation", t => {
+  const { loadConfig, localPath } = require(path.join(ROOT, "src", "config.js"));
+  const existsSync = fs.existsSync;
+  t.mock.method(fs, "existsSync", file => file === localPath ? false : existsSync(file));
 
   const base = loadConfig([], {});
+  assert.equal(base.provider, "ollama");
+  assert.equal("foundry" in base, false, "removed runtime settings must not be exposed");
+  assert.equal("dictation" in base, false, "removed microphone settings must not be exposed");
   assert.equal(base.web.host, "127.0.0.1", "must default to loopback");
   assert.ok(base.web.port > 0, "must have a stable default port");
 
@@ -141,6 +172,27 @@ test("config: resolution order and validation", () => {
 
   const viaCli = loadConfig(["--port=8765"], { HORIZON_PORT: "4321" });
   assert.equal(viaCli.web.port, 8765, "CLI must override the environment");
+
+  const runtime = loadConfig(["--ollama-url=http://127.0.0.1:12345", "--request-timeout-ms=9000"], {
+    HORIZON_OLLAMA_URL: "http://127.0.0.1:23456",
+    HORIZON_REQUEST_TIMEOUT_MS: "8000",
+    HORIZON_STATUS_TIMEOUT_MS: "700",
+    HORIZON_STATUS_CACHE_MS: "100",
+    HORIZON_WARM_UP_TIMEOUT_MS: "11000",
+    HORIZON_MODEL_ID: "stub-model"
+  });
+  assert.equal(runtime.ollama.baseUrl, "http://127.0.0.1:12345");
+  assert.equal(runtime.inference.requestTimeoutMs, 9000);
+  assert.equal(runtime.inference.statusTimeoutMs, 700);
+  assert.equal(runtime.inference.statusCacheMs, 100);
+  assert.equal(runtime.inference.warmUpTimeoutMs, 11000);
+  assert.equal(runtime.model.id, "stub-model");
+  const runtimeViaEnv = loadConfig([], {
+    HORIZON_OLLAMA_URL: "http://127.0.0.1:23456",
+    HORIZON_REQUEST_TIMEOUT_MS: "8000"
+  });
+  assert.equal(runtimeViaEnv.ollama.baseUrl, "http://127.0.0.1:23456");
+  assert.equal(runtimeViaEnv.inference.requestTimeoutMs, 8000);
 
   assert.throws(() => loadConfig(["--port=999999"], {}), /Invalid web port/);
 });
@@ -159,16 +211,10 @@ test("config: contact URL reaches the client, and is optional", () => {
     "environment must be able to set the contact URL");
 });
 
-// The About page names Microsoft's trademarks, so the disclaimer has to stay.
-// The feedback buttons must also stay gated on a contact URL, or a fork with
+// The feedback buttons must stay gated on a contact URL, or a fork with
 // no contact page ships a dead link.
-test("about: trademark notice and gated feedback survive edits", () => {
+test("about: gated feedback survives runtime branding removal", () => {
   const client = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
-
-  assert.match(client, /not a Microsoft product/,
-    "About must disclaim affiliation while using the Foundry name");
-  assert.match(client, /trademarks of the Microsoft group of companies/,
-    "About must carry the trademark attribution");
 
   assert.match(client, /const contactUrl = state\.app\?\.contactUrl;\s*\n\s*if \(contactUrl\)/,
     "feedback must render only when a contact URL is configured");
@@ -179,36 +225,9 @@ test("about: trademark notice and gated feedback survive edits", () => {
   // Both glyphs must actually exist in the built sprite, or the buttons render
   // empty squares.
   const built = fs.readFileSync(path.join(ROOT, "public", "index.html"), "utf8");
-  for (const glyph of ["i-thumb-up", "i-thumb-down", "i-foundry"]) {
+  for (const glyph of ["i-thumb-up", "i-thumb-down"]) {
     assert.ok(built.includes(`<symbol id="${glyph}"`), `${glyph} must be in the built sprite`);
   }
-});
-
-// Foundry's icon is read from the local install rather than copied into this
-// repo, so that publishing Horizon redistributes none of Microsoft's artwork.
-// This test guards the boundary: no image files, and a lookup that fails
-// softly when Foundry is absent.
-test("brand: Foundry artwork is never vendored into the repo", async () => {
-  const { foundryIcon } = require(path.join(ROOT, "src", "brand.js"));
-
-  const icon = await foundryIcon();
-  if (icon) {
-    assert.ok(icon.bytes.length > 0, "a located icon must have content");
-    assert.equal(icon.bytes.readUInt32BE(0), 0x89504e47, "must be served as a real PNG");
-    assert.ok(!icon.source.startsWith(ROOT),
-      "the icon must come from the Foundry install, never from inside this repo");
-  }
-
-  // Nothing Foundry-branded may sit in the published tree.
-  const publicDir = path.join(ROOT, "public");
-  const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
-    const full = path.join(dir, entry.name);
-    return entry.isDirectory() ? walk(full) : [full];
-  });
-  const suspicious = walk(publicDir).filter(file =>
-    /foundry|azure|microsoft/i.test(path.basename(file)) &&
-    /\.(png|jpe?g|svg|ico|webp)$/i.test(file));
-  assert.deepEqual(suspicious, [], "no Microsoft-branded image may ship in public/");
 });
 
 test("net: loopback detection", () => {
@@ -221,48 +240,48 @@ test("net: loopback detection", () => {
   }
 });
 
-test("foundry: rejects unsafe model aliases", () => {
-  const foundry = require(path.join(ROOT, "src", "foundry.js"));
+test("ollama: rejects unsafe model aliases", () => {
+  const { isSafeAlias } = require(path.join(ROOT, "src", "ollama.js"));
   for (const bad of ["phi-4; calc.exe", "a && whoami", "../../etc", "a|b", "$(id)", "`id`", "", "a b"]) {
-    assert.equal(foundry.isSafeAlias(bad), false, `must reject: ${bad}`);
+    assert.equal(isSafeAlias(bad), false, `must reject: ${bad}`);
   }
-  for (const good of ["phi-4", "qwen2.5-coder-1.5b", "Phi-4-generic-gpu"]) {
-    assert.equal(foundry.isSafeAlias(good), true, `must accept: ${good}`);
+  for (const good of ["phi4-mini", "qwen2.5-coder:1.5b", "hf.co/example/model:Q4_K_M"]) {
+    assert.equal(isSafeAlias(good), true, `must accept: ${good}`);
   }
 });
 
-// "foundry model list" reports the catalogue but has no "loaded" field at all,
-// so trusting it alone made every model look unloaded even while one was live.
-test("foundry: catalogue takes load state from the cache listing", () => {
-  const foundry = require(path.join(ROOT, "src", "foundry.js"));
+// Installed models and resident models are separate states in Ollama.
+test("ollama: catalogue takes load state from the resident listing", () => {
+  const { createOllama } = require(path.join(ROOT, "src", "ollama.js"));
+  const ollama = createOllama({});
 
   const catalogueModels = [
-    { alias: "phi-4", cached: true, loaded: false },
-    { alias: "qwen3-1.7b", cached: true, loaded: false },
-    { alias: "gpt-oss-20b", cached: false, loaded: false }
+    { alias: "phi4-mini:latest", cached: true, loaded: false },
+    { alias: "qwen3:1.7b", cached: true, loaded: false },
+    { alias: "gpt-oss:20b", cached: false, loaded: false }
   ];
   const cacheModels = [
-    { alias: "phi-4", loaded: false },
-    { alias: "qwen3-1.7b", loaded: true }
+    { alias: "phi4-mini:latest", loaded: false },
+    { alias: "qwen3:1.7b", loaded: true }
   ];
 
-  const merged = foundry.mergeLoadState(catalogueModels, cacheModels);
+  const merged = ollama.mergeLoadState(catalogueModels, cacheModels);
   const byAlias = Object.fromEntries(merged.map(model => [model.alias, model]));
 
-  assert.equal(byAlias["qwen3-1.7b"].loaded, true, "a resident model must read as loaded");
-  assert.equal(byAlias["phi-4"].loaded, false, "a downloaded but unloaded model must not read as loaded");
-  assert.equal(byAlias["gpt-oss-20b"].loaded, false, "an absent model must not read as loaded");
-  assert.equal(byAlias["phi-4"].cached, true, "merging must not disturb the other fields");
+  assert.equal(byAlias["qwen3:1.7b"].loaded, true, "a resident model must read as loaded");
+  assert.equal(byAlias["phi4-mini:latest"].loaded, false, "a downloaded but unloaded model must not read as loaded");
+  assert.equal(byAlias["gpt-oss:20b"].loaded, false, "an absent model must not read as loaded");
+  assert.equal(byAlias["phi4-mini:latest"].cached, true, "merging must not disturb the other fields");
 
   assert.deepEqual(
-    foundry.mergeLoadState(catalogueModels, []).map(model => model.loaded),
+    ollama.mergeLoadState(catalogueModels, []).map(model => model.loaded),
     [false, false, false],
     "with no cache listing nothing should claim to be loaded"
   );
 });
 
-test("foundry: parses server-sent events and stops at [DONE]", async () => {
-  const foundry = require(path.join(ROOT, "src", "foundry.js"));
+test("client: parses server-sent events and stops at [DONE]", async () => {
+  const { parseServerSentEvents } = require(path.join(ROOT, "src", "openai-client.js"));
   const body = [
     'data: {"choices":[{"delta":{"content":"a"}}]}',
     "",
@@ -275,14 +294,17 @@ test("foundry: parses server-sent events and stops at [DONE]", async () => {
   ].join("\n");
 
   const seen = [];
-  for await (const event of foundry.parseServerSentEvents({ body: [Buffer.from(body)] })) {
+  for await (const event of parseServerSentEvents({ body: [Buffer.from(body)] })) {
     seen.push(event.choices[0].delta.content);
   }
   assert.deepEqual(seen, ["a", "b"], "must stop at [DONE]");
 });
 
-test("server: starts without Foundry and reports it honestly", async t => {
+test("server: starts without Ollama and reports it honestly", async t => {
+  const stub = await startStubOllama();
+  await new Promise(resolve => stub.server.close(resolve));
   const app = await startApp({
+    ...stubEnv(stub.port),
     HORIZON_PORT: "0",
     HORIZON_OPEN_BROWSER: "false",
     HORIZON_WARM_UP: "false",
@@ -291,11 +313,11 @@ test("server: starts without Foundry and reports it honestly", async t => {
     // server. That is what made this suite fail intermittently during
     // development, while passing whenever nothing else was running.
     HORIZON_ALLOW_MULTIPLE_INSTANCES: "true",
-    PATH: path.join(__dirname, "no-foundry")
+    PATH: path.join(__dirname, "no-ollama")
   });
   t.after(() => stop(app));
 
-  assert.equal((await request(`${app.url}/`)).status, 200, "page must serve with no Foundry");
+  assert.equal((await request(`${app.url}/`)).status, 200, "page must serve with no Ollama");
 
   const status = await (await request(`${app.url}/api/status`)).json();
   assert.equal(status.ready, false, "must not claim to be ready");
@@ -551,10 +573,6 @@ test("ui: pasting a link warns that the model cannot read it", () => {
   assert.match(html, /can't open links/i, "the warning must say the model cannot open links");
 });
 
-// Foundry picks a new port every time it restarts. The CLI talks to the daemon
-// directly, so it keeps answering correctly while the endpoint Horizon holds
-// has gone stale -- which produced ready:true against a dead address. Worse
-// than an error, because the page looks fine until a message fails.
 // The reader is the one part of Horizon that leaves this machine. A pasted
 // link must never be able to reach the machine it was pasted on, or anything
 // else on the local network -- that would turn Horizon into a way to probe a
@@ -595,21 +613,19 @@ test("reader: strips markup down to readable text", () => {
 
 test("server: readiness is not claimed against a stale endpoint", () => {
   const source = fs.readFileSync(path.join(ROOT, "src", "server.js"), "utf8");
-  const foundry = require(path.join(ROOT, "src", "foundry.js"));
 
-  assert.equal(typeof foundry.endpointAlive, "function",
-    "there must be a way to check an endpoint is still alive");
-
-  const probe = /async function probeFoundry\(\)[\s\S]*?\n}/.exec(source);
-  assert.ok(probe, "probeFoundry must exist");
-  assert.match(probe[0], /endpointAlive/,
-    "readiness must verify the endpoint rather than trusting the CLI alone");
-  assert.match(probe[0], /rediscoverFoundry/,
+  const probe = /async function probeRuntime\(\)[\s\S]*?\n}/.exec(source);
+  assert.ok(probe, "probeRuntime must exist");
+  assert.match(probe[0], /await provider\.listModels\(state\.baseUrl, config\.inference\.statusTimeoutMs\)/,
+    "readiness must verify models at the current endpoint");
+  assert.match(probe[0], /models\.some\(model => model\.id === state\.modelId\)/,
+    "the selected model must still be installed");
+  assert.match(probe[0], /rediscoverRuntime/,
     "a stale endpoint must trigger rediscovery");
 });
 
 test("server: serves assets, blocks traversal, streams a reply", async t => {
-  const stub = await startStubFoundry();
+  const stub = await startStubOllama();
   t.after(() => stub.server.close());
 
   const app = await startApp(stubEnv(stub.port));
@@ -656,7 +672,7 @@ test("server: serves assets, blocks traversal, streams a reply", async t => {
 });
 
 test("server: rejects command injection through the model picker", async t => {
-  const stub = await startStubFoundry();
+  const stub = await startStubOllama();
   t.after(() => stub.server.close());
 
   const app = await startApp(stubEnv(stub.port));
@@ -673,30 +689,35 @@ test("server: rejects command injection through the model picker", async t => {
 });
 
 test("server: diagnostics report every hop on loopback", async t => {
-  const stub = await startStubFoundry();
+  const stub = await startStubOllama();
   t.after(() => stub.server.close());
 
   const app = await startApp(stubEnv(stub.port));
   t.after(() => stop(app));
 
   const data = await (await request(`${app.url}/api/diagnostics`)).json();
-  assert.deepEqual(data.hops.map(hop => hop.id), ["server", "foundry", "model"]);
+  assert.deepEqual(data.hops.map(hop => hop.id), ["server", "runtime", "model"]);
+  assert.equal(data.hops[1].label, "Ollama service");
   assert.equal(data.allLoopback, true, "every hop must be loopback");
 });
 
-test("server: refuses a non-loopback Foundry endpoint", async () => {
+test("server: refuses a non-loopback Ollama endpoint", async () => {
   await assert.rejects(startApp({
-    FOUNDRY_BASE_URL: "http://example.com/v1",
+    HORIZON_PROVIDER: "ollama",
+    HORIZON_OLLAMA_URL: "http://example.com",
+    HORIZON_OLLAMA_AUTOSTART: "false",
+    HORIZON_MODEL_ID: "stub-model",
+    HORIZON_ALLOW_MULTIPLE_INSTANCES: "true",
     HORIZON_PORT: "0",
     HORIZON_OPEN_BROWSER: "false"
-  }), /exited/, "must refuse to start against a remote endpoint");
+  }), /non-loopback Ollama endpoint/, "must explicitly refuse a remote endpoint, not merely fail startup for another reason");
 });
 
 // Launching twice used to start a second server on the next free port AND
 // overwrite the state file, after which Stop-Horizon targeted the wrong
 // process and left the real one running.
 test("server: a second launch hands over to the first", async t => {
-  const stub = await startStubFoundry();
+  const stub = await startStubOllama();
   t.after(() => stub.server.close());
 
   // Its own state file, so a Horizon running outside the test suite cannot
@@ -742,7 +763,7 @@ test("server: a second launch hands over to the first", async t => {
 });
 
 test("server: falls back when the chosen port is busy", async t => {
-  const stub = await startStubFoundry();
+  const stub = await startStubOllama();
   t.after(() => stub.server.close());
 
   const blocker = http.createServer(() => {});
@@ -763,11 +784,19 @@ test("server: falls back when the chosen port is busy", async t => {
 // the exit. A shutdown that returns before the unload lands would leave
 // gigabytes resident with nothing left running to release them.
 test("server: exiting releases the model before the process ends", async t => {
-  const stub = await startStubFoundry();
+  const stub = await startStubOllama();
   t.after(() => stub.server.close());
 
   const app = await startApp(stubEnv(stub.port));
   t.after(() => stop(app));
+
+  const reply = await request(`${app.url}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], stream: false })
+  });
+  assert.equal(reply.status, 200);
+  assert.equal(stub.resident.has("stub-model"), true, "chat must load the model before shutdown can release it");
 
   const exited = new Promise(resolve => app.child.on("exit", code => resolve(code)));
   const response = await request(`${app.url}/api/shutdown`, {
@@ -783,6 +812,10 @@ test("server: exiting releases the model before the process ends", async t => {
     new Promise((_, reject) => setTimeout(() => reject(new Error("did not exit")), 20000))
   ]);
   assert.equal(code, 0, "must exit cleanly rather than being killed");
+  assert.ok(stub.calls.some(call => call.url === "/api/generate" &&
+    call.body.model === "stub-model" && call.body.keep_alive === 0),
+    "shutdown must unload through the native Ollama API before exiting");
+  assert.equal(stub.resident.has("stub-model"), false);
 
   const out = app.output();
   assert.match(out, /Shutting down/, "must announce the shutdown");
@@ -800,338 +833,47 @@ test("server: exiting releases the model before the process ends", async t => {
     "the runtime state file must be cleared on exit");
 });
 
-/* ------------------------------------------------------------- dictation -- */
+/* ------------------------------------------------------ removed recording -- */
 
-test("dictation: settings are validated before they reach the command line", () => {
-  const { loadConfig } = require(path.join(ROOT, "src", "config.js"));
+test("server: dictation endpoints are removed", async t => {
+  const stub = await startStubOllama();
+  t.after(() => stub.server.close());
+  const app = await startApp(stubEnv(stub.port));
+  t.after(() => stop(app));
 
-  // Explicitly off rather than read from config.local.json, which belongs to
-  // whoever is running the suite and may legitimately have dictation switched
-  // on. The shipped default is asserted from config.json instead.
-  const shipped = JSON.parse(fs.readFileSync(path.join(ROOT, "config.json"), "utf8"));
-  assert.equal(shipped.dictation.enabled, false,
-    "dictation opens the microphone, so it must ship switched off");
-
-  const base = loadConfig([], { HORIZON_DICTATION: "false" });
-  assert.equal(base.dictation.enabled, false, "the setting must be honoured");
-
-  // The alias is passed to the Foundry CLI. A hand-edited config file is not a
-  // trusted source, so anything outside the safe set has to be refused rather
-  // than forwarded.
-  assert.throws(() => loadConfig([], { HORIZON_DICTATION_MODEL: "model; rm -rf /" }),
-    /Invalid dictation model alias/, "must refuse an alias containing shell syntax");
-  assert.throws(() => loadConfig([], { HORIZON_DICTATION_MODEL: "--output=json" }),
-    /Invalid dictation model alias/, "must refuse an alias that looks like a flag");
-
-  // A wrong idle timeout means a speech model held in memory, or a microphone
-  // released so aggressively that dictation is unusable.
-  assert.throws(() => loadConfig([], { HORIZON_DICTATION_IDLE_MS: "1000" }),
-    /Invalid dictation idle timeout/, "must refuse an idle timeout under a minute");
-  assert.throws(() => loadConfig([], { HORIZON_DICTATION_IDLE_MS: "5400000" }),
-    /Invalid dictation idle timeout/, "must refuse an idle timeout over thirty minutes");
-
-  const chosen = loadConfig([], { HORIZON_DICTATION_IDLE_MS: "600000" });
-  assert.equal(chosen.dictation.idleTimeoutMs, 600000, "a value in range must be kept");
-});
-
-test("dictation: terminal decoration is never mistaken for speech", () => {
-  const dictation = require(path.join(ROOT, "src", "dictation.js"));
-
-  // The CLI draws a prompt around the transcript. None of it was spoken, and
-  // all of it would otherwise be typed into the user's message.
-  for (const line of [
-    "Transcribing model (nemotron-speech-streaming-en-0.6b)",
-    "note: Type /help to see transcribe commands, /exit to quit.",
-    "note: Recording... type /stop to finish.",
-    "Press space bar and speak...",
-    "/record",
-    "--------------------------------"
-  ]) {
-    assert.equal(dictation.isChrome(line), true, `must ignore CLI chrome: ${line}`);
+  for (const endpoint of ["/api/dictation", "/api/dictation/events"]) {
+    assert.equal((await request(app.url + endpoint)).status, 404, `${endpoint} must not expose a recording capability`);
   }
-
-  assert.equal(dictation.isChrome("This is a test dictation"), false,
-    "must keep what was actually said");
-
-  // Colour and title sequences arrive mixed into the text.
-  assert.equal(dictation.stripAnsi("\u001b[32mhello\u001b[0m"), "hello",
-    "must remove colour codes");
-  assert.equal(dictation.stripAnsi("\u001b]0;title\u0007hello"), "hello",
-    "must remove the window title sequence");
-
-  // The CLI wraps its output at the terminal width, and a narrow terminal
-  // splits words across chunks ("requested" arriving as "requ" then "ested").
-  // The width is the defence against that, so it is asserted rather than left
-  // as a number someone might reasonably tidy up later.
-  assert.ok(dictation.PTY_COLUMNS >= 2000,
-    "the terminal must be wide enough that lines are not wrapped mid-word");
-});
-
-test("dictation: the page is told honestly what this machine can do", async () => {
-  const stub = await startStubFoundry();
-  // Pinned off explicitly. Whether dictation is switched on lives in
-  // config.local.json, which belongs to whoever is running the suite, so the
-  // test must not read their setting and must not leave one behind.
-  const app = await startApp({ ...stubEnv(stub.port), HORIZON_DICTATION: "false" });
-
-  try {
-    const status = await (await request(`${app.url}/api/dictation`)).json();
-
-    // Whether node-pty is installed depends on the machine, but the answer must
-    // always be accompanied by a reason when the answer is no.
-    assert.equal(typeof status.available, "boolean", "must state whether dictation can run");
-    if (!status.available) {
-      assert.ok(status.reason, "must say why dictation is unavailable rather than failing silently");
-    }
-
-    // The browser plays no part in recording: the Foundry CLI opens the
-    // microphone. The page relies on this to know it must show its own
-    // recording indicator, because the tab will not show one.
-    assert.equal(status.browserCapturesAudio, false,
-      "the page must know that the browser does not capture the audio");
-
-    // Off by default, and refusing to act while off.
-    assert.equal(status.enabled, false, "must be off until switched on");
-    const refused = await request(`${app.url}/api/dictation`, {
+  for (const action of ["record", "stop", "nonsense"]) {
+    const response = await request(`${app.url}/api/dictation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "record" })
+      body: JSON.stringify({ action })
     });
-    assert.equal(refused.status, 409, "must refuse to record while switched off");
-
-    const unknownAction = await request(`${app.url}/api/dictation`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "nonsense" })
-    });
-    // Still 409 while switched off: the capability gate comes first, which is
-    // the behaviour that matters.
-    assert.equal(unknownAction.status, 409, "must not act on an unknown action");
-  } finally {
-    await stop(app);
-    stub.server.close();
+    assert.equal(response.status, 404, "removed recording actions must not be accepted");
   }
 });
 
-test("ui: a recording is always visible on the page", () => {
-  const css = fs.readFileSync(path.join(ROOT, "public", "app.css"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "");
+test("ui: removed dictation exposes no microphone controls or recording requests", () => {
   const html = fs.readFileSync(path.join(ROOT, "public", "index.html"), "utf8");
-
-  // Horizon never calls getUserMedia, so the browser shows no permission prompt
-  // and no recording indicator in the tab. The banner is the only signal the
-  // user gets that the microphone is open, and it must exist and be announced.
-  assert.match(html, /id="dictation-bar"/, "the recording banner must exist");
-  assert.match(html, /id="dictation-bar"[^>]*role="status"/,
-    "the banner must be announced to assistive technology");
-  assert.match(html, /aria-live="assertive"/,
-    "a live microphone is interrupting news, not a passing status");
-  assert.match(html, /id="dictation-stop"/, "the banner must offer a way to stop");
-
-  assert.ok(/\.dictation-bar\s*\{[^}]*\}/.test(css), ".dictation-bar must be styled");
-
-  // A microphone picker in the page would be a lie: the CLI records through
-  // whatever Windows has chosen, and nothing the page offers can change it.
-  assert.ok(!/id="mic-picker"|id="dictation-device"/.test(html),
-    "the page must not offer a microphone picker it cannot honour");
-});
-
-test("dictation: a redraw replaces the line rather than repeating it", () => {
-  const { DictationSession } = require(path.join(ROOT, "src", "dictation.js"));
-  const session = new DictationSession({ alias: "stub" });
-
-  const updates = [];
-  session.on("text", payload => updates.push(payload));
-
-  // How the CLI actually behaves, taken from a recorded session: while speech
-  // is being decoded it rewrites its last line in place and sends NO newline,
-  // the way a progress indicator does. Each update repositions the cursor
-  // first, which is the terminal saying the text draws over what is there.
-  session._consume("\u001b[38;2;107;114;128m\u001b[7;3H Testing testing");
-  session._consume("\u001b[m");
-  session._consume("\u001b[38;2;107;114;128m\u001b[7;3H Testing testing one two");
-  session._consume("\u001b[m");
-  session._consume("\u001b[38;2;107;114;128m\u001b[7;3H Testing testing one two three. This is a test");
-
-  // Waiting for a newline would hold everything back until recording stopped,
-  // which is what made dictation look like it was not streaming at all.
-  assert.ok(updates.length >= 3, "each redraw must reach the page as it happens");
-
-  // And each redraw replaces the line. Keeping every version is what made the
-  // transcript repeat the same sentence over and over.
-  assert.equal(session.transcript(), "Testing testing one two three. This is a test",
-    "a redrawn line must replace the previous text, not be added to it");
-
-  // The echo of a command being typed is not speech.
-  session._consume("\u001b[7;3H/sto");
-  assert.equal(session.transcript(), "Testing testing one two three. This is a test",
-    "a command being typed must never appear in the transcript");
-
-  // A genuine newline settles the segment, and a new one begins after it.
-  session._consume("\u001b[7;3H Testing testing one two three. This is a test and this is settled\n");
-  session._consume("\u001b[7;3H a second segment");
-  assert.match(session.transcript(), /settled a second segment$/,
-    "a completed line must be kept and the next line started after it");
-
-  // The model name is printed under the heading when the session opens, and is
-  // not something anyone said.
-  const fresh = new DictationSession({ alias: "stub" });
-  fresh._consume("\u001b[7;3H(nemotron-speech-streaming-en-0.6b)\n");
-  assert.equal(fresh.transcript(), "", "the model name must never appear in the transcript");
-});
-
-test("dictation: stopping does not repeat what was said", () => {
-  const { DictationSession } = require(path.join(ROOT, "src", "dictation.js"));
-  const session = new DictationSession({ alias: "stub" });
-
-  // Pretend a recording is running, then speak.
-  session.recording = true;
-  session._accepting = true;
-  session._consume("\u001b[7;3H This is a test dictation");
-  session._consume("\u001b[7;3H This is a test dictation that is working");
-
-  // Stopping settles the line. The CLI then repaints it, more than once, which
-  // is what made the finished transcript appear two and three times over.
-  session.recording = false;
-  session._accepting = false;
-  session._settle();
-  session._consume("\u001b[7;3H This is a test dictation that is working");
-  session._consume("\u001b[7;3H This is a test dictation that is working");
-
-  assert.equal(session.transcript(), "This is a test dictation that is working",
-    "the finished transcript must contain what was said exactly once");
-});
-
-test("dictation: a stranded audio session is reported and cleared", () => {
-  const dictation = require(path.join(ROOT, "src", "dictation.js"));
-  const { DictationSession } = dictation;
-
-  // Foundry keeps the audio stream against the model, and the daemon outlives
-  // Horizon. A session that died without stopping leaves it held, and every
-  // later recording fails until something clears it. The user cannot see that
-  // and cannot act on it, so it must not surface as a bare failure.
-  const session = new DictationSession({ alias: "stub" });
-  const errors = [];
-  session.on("error", payload => errors.push(payload.message));
-  session._signals("error: A streaming session is already active (handle: audio-stream-123).");
-  assert.equal(errors.length, 1, "the page must be told what went wrong");
-  assert.match(errors[0], /holding a recording session/i,
-    "in words the user can act on, not with a daemon handle");
-
-  // Any other CLI error is passed on as it was written, rather than swallowed.
-  const other = new DictationSession({ alias: "stub" });
-  const seen = [];
-  other.on("error", payload => seen.push(payload.message));
-  other._signals("\u25a0 error: Model 'x' only supports live-streaming transcription.");
-  assert.equal(seen.length, 1, "other failures must reach the page too");
-  assert.match(seen[0], /only supports live-streaming/, "and keep the CLI's own wording");
-
-  // Unloading the model does NOT release the stream: it reports success, the
-  // model shows as unloaded, and the stream stays held. Only restarting the
-  // Foundry service clears it. The helper is kept because it is the right way
-  // to give the memory back, but it must not be mistaken for a way to release
-  // an audio session.
-  let called = null;
-  const fakeExec = (cmd, args, opts, cb) => { called = args; cb(null, "", ""); };
-  return dictation.releaseStrandedSession("stub-alias", fakeExec).then(() => {
-    assert.deepEqual(called, ["model", "unload", "stub-alias"],
-      "the helper unloads the model, which frees memory but NOT the audio stream");
-  });
-});
-
-test("dictation: a failure never becomes transcript text", () => {
-  const { DictationSession } = require(path.join(ROOT, "src", "dictation.js"));
-  const session = new DictationSession({ alias: "stub" });
-
-  const errors = [];
-  session.on("error", payload => errors.push(payload.message));
-  session.recording = true;
-  session._accepting = true;
-
-  // Exactly what Foundry printed when a session was left open by an earlier
-  // recording. Every line of this arrived on the same stream as the transcript
-  // and was typed into the user's message.
-  session._consume("\u001b[7;3H\u25cf error: IPC error 'op_handler_failed': Error starting audio stream session: Error: System.InvalidOperationException: A streaming session is already active (handle: audio-stream-7821b348).\n");
-  session._consume("   at Microsoft.AI.Foundry.Local.AudioStreamingSessionFactory.CreateSession(OnnxLoadedModel, AudioStreamingSettings) + 0x1d4\n");
-  session._consume("--- End of stack trace from previous location ---\n");
-  session._consume("Hint: Try 'foundry server stop' then 'foundry server start'.\n");
-
-  assert.equal(session.transcript(), "",
-    "a stack trace is not something anybody said, and must never reach the message box");
-  assert.ok(errors.length, "the failure must be reported instead");
-  assert.match(errors[0], /holding a recording session|clearing/i,
-    "and said in words the user can act on");
-
-  // A session that failed is not recording, however it looked a moment ago.
-  assert.equal(session.recording, false,
-    "a live microphone must not be shown for a session that never opened");
-});
-
-test("ui: the dictation setting says where the recording happens", () => {
   const app = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
-
-  // Dictation was previously reachable only by hand-editing config.local.json,
-  // which is not a reasonable thing to ask of the people this is built for.
-  assert.match(app, /function renderDictationSetup/,
-    "dictation must be switchable from Settings, not only from a file");
-  assert.match(app, /renderDictationSetup\(panel\)/,
-    "and the panel must actually be rendered");
-
-  const panel = app.slice(app.indexOf("function renderDictationSetup"));
-  const body = panel.slice(0, panel.indexOf("\n/* ---"));
-
-  // The one thing nobody can work out by using it: the page never opens the
-  // microphone, so the browser shows no prompt and no recording dot.
-  assert.match(body, /does not record through this browser/i,
-    "the panel must say the browser is not doing the recording");
-  assert.match(body, /no permission prompt/i,
-    "and that no permission will be asked for");
-
-  // And the one thing that will otherwise waste someone's afternoon.
-  assert.match(body, /default input device/i,
-    "the panel must say Foundry uses the Windows default microphone");
-  assert.match(body, /cannot choose for you/i,
-    "and admit Horizon cannot change it");
-
-  // A machine without the terminal helper must be told why, not shown a
-  // control that cannot work.
-  assert.match(body, /if \(!status\.available\)/,
-    "an unavailable capability must explain itself instead of offering a switch");
+  assert.doesNotMatch(html, /id="(?:dictate-btn|dictate-icon|dictation-bar|dictation-stop|mic-picker|dictation-device)"/,
+    "the page must not offer removed microphone controls");
+  assert.doesNotMatch(html, /<symbol\b[^>]*id="i-mic"/, "the removed microphone glyph must not ship");
+  assert.doesNotMatch(app, /\/api\/dictation\b|renderDictationSetup|\bgetUserMedia\b|\b(?:webkit)?SpeechRecognition\b/,
+    "the client must neither invoke removed endpoints nor substitute browser recording");
 });
 
-test("dictation: switching it on is a one-time decision", () => {
+test("ui: local read-aloud remains wired independently of recording", () => {
+  const html = fs.readFileSync(path.join(ROOT, "public", "index.html"), "utf8");
   const app = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
-  const server = fs.readFileSync(path.join(ROOT, "src", "server.js"), "utf8");
-
-  // Asked for once, remembered on disk. Nobody should have to visit Settings
-  // every time they want to speak.
-  assert.match(server, /saveLocalSettings\(\{ dictation: \{ enabled/,
-    "the choice must be written to the user's own settings file");
-
-  // The model is fetched when the choice is made, not when the first recording
-  // is attempted: a 700 MB download behind a button press is a stall nobody
-  // was warned about.
-  assert.match(server, /if \(body\.enabled\) dictationEnsureModel\(\)/,
-    "agreeing must start the download");
-  assert.match(server, /function dictationEnsureModel/,
-    "and there must be something to start");
-
-  // But it is not held in memory from then on. Loading happens on the first
-  // recording and is released when idle, which is the whole point of the
-  // idle timeout.
-  const ensure = server.slice(server.indexOf("function dictationEnsureModel"));
-  const body = ensure.slice(0, ensure.indexOf("\nasync function"));
-  assert.ok(!/\bfoundry\.loadModel\b|\bensureLoaded\b/.test(body),
-    "downloading must not also load the model into memory");
-
-  // The button stays visible when dictation is off. Hiding it means nobody
-  // ever finds out the feature exists.
-  assert.match(app, /ui\.dictateBtn\.hidden = !state\.dictation\.available/,
-    "the button must be hidden only when the machine cannot run it");
-  assert.match(app, /Dictation is off\. Switch it on in Settings/,
-    "and must say where to switch it on");
-  assert.match(app, /if \(!state\.dictation\.enabled\)[\s\S]{0,240}setMode\("settings"\)/,
-    "pressing it while off must take the user to the switch");
+  const speech = fs.readFileSync(path.join(ROOT, "public", "speech.js"), "utf8");
+  assert.match(html, /<script\b[^>]*src="\/speech\.js"/, "the local read-aloud module must still load");
+  assert.match(app, /HorizonSpeech\?\.attach\(/, "assistant replies must retain read-aloud controls");
+  assert.match(app, /HorizonSpeech\.mountSettings\(/, "local voice settings must remain available");
+  assert.match(speech, /voice\.localService === true/, "only verified local voices may read replies");
+  assert.doesNotMatch(speech, /\bfetch\s*\(|\/api\/dictation\b|\bgetUserMedia\b/,
+    "read-aloud must not use a server speech endpoint or microphone");
 });
 
 test("ui: a link is read whatever case it was typed in", () => {
@@ -1303,8 +1045,10 @@ test("chat: reasoning says how long it took, and survives a reload", () => {
 
   // Painting runs every frame while the answer reveals. Collapsing on each
   // pass shut the box again a moment after a reader opened it to look.
-  assert.match(source, /if \(closed && !collapsedOnce\) \{\s*\n\s*collapsedOnce = true;/,
-    "the box must collapse once, not on every frame");
+  assert.ok(!source.includes("collapsedOnce"),
+    "streaming must never override the reader's expansion choice");
+  assert.match(source, /thinkingBox\.open = false/,
+    "reasoning starts compact");
   assert.ok(!/if \(closed && thinkingBox\.open\)/.test(source),
     "nothing may re-close a box the reader has opened");
 });
@@ -1363,27 +1107,4 @@ test("chat: a model's headings and rules are shown as structure, not as text", (
   // The cheap path skips all of this, so it must not skip text that needs it.
   const fast = /if \(!\/\[`\*#\]\/\.test\(value\) && !value\.includes\("---"\)\)/.exec(source);
   assert.ok(fast, "the fast path must also rule out headings and rules");
-});
-
-test("brand: Foundry's own icon is found before the page asks for it", () => {
-  const server = fs.readFileSync(path.join(ROOT, "src", "server.js"), "utf8");
-
-  // Locating the icon walks the install directory and falls back to
-  // PowerShell: about a second and a quarter on a cold start, then memoised.
-  // Left until the page asks, that cost is paid in front of the user, and the
-  // glyph changes under them a second after Settings opens.
-  assert.match(server, /foundryIcon\(\)\.catch\(\(\) => \{\}\)/,
-    "the icon must be looked up at startup, not on first sight of it");
-
-  // A failure here is not worth a word: the page already falls back to its own
-  // glyph, which is the same outcome as Foundry not being installed.
-  const startup = server.slice(server.indexOf("foundryIcon().catch"));
-  assert.ok(!/foundryIcon\(\)\.catch\(\(\) => \{\}\)\s*\.then/.test(startup),
-    "warming the icon must not gate anything else");
-
-  const client = fs.readFileSync(path.join(ROOT, "public", "app.js"), "utf8");
-  // The fallback is still drawn first, so an uninstalled Foundry shows a glyph
-  // rather than a gap.
-  assert.match(client, /wrap\.append\(icon\(fallbackId/,
-    "the fallback glyph must still be drawn before the real one arrives");
 });

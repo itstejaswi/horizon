@@ -1,29 +1,32 @@
 <#
 .SYNOPSIS
-    Stops the local website, unloads the model, and stops the Foundry Local service.
-    With Ollama it unloads the model and leaves Ollama running.
+    Stops the local website and unloads its Ollama model. Ollama itself is left running.
 
 .EXAMPLE
     .\Stop-Horizon.ps1
 
 .EXAMPLE
-    .\Stop-Horizon.ps1 -KeepService
+    .\Stop-Horizon.ps1 -ModelAlias qwen2.5:1.5b
 #>
 [CmdletBinding()]
 param(
-    [string] $ModelAlias,
-    [switch] $KeepService
+    [string] $ModelAlias
 )
 
 $ErrorActionPreference = 'Continue'
 . (Join-Path $PSScriptRoot 'Common-Horizon.ps1')
 
 $config = Get-HorizonConfig
-$provider = if ($env:HORIZON_PROVIDER) { $env:HORIZON_PROVIDER }
-    elseif ($config.PSObject.Properties.Name -contains 'provider') { $config.provider }
-    else { 'foundry' }
-$provider = "$provider".Trim().ToLowerInvariant()
-if (-not $ModelAlias) { $ModelAlias = if ($provider -eq 'ollama') { 'llama3.2:3b' } else { $config.model.alias } }
+$state = Get-HorizonRuntimeState -Config $config
+if (-not $ModelAlias) {
+    $ModelAlias = if ($state -and $state.modelAlias) { [string]$state.modelAlias } else { [string]$config.model.alias }
+}
+$ModelAlias = Assert-OllamaModelAlias -Alias $ModelAlias
+$ollamaBase = if ($state -and $state.endpoint) {
+    Assert-LoopbackEndpoint -Endpoint ([string]$state.endpoint)
+} else {
+    Get-OllamaBaseUrl -Config $config
+}
 
 Write-Host ""
 Write-Host "Stopping $($config.app.displayName)" -ForegroundColor White
@@ -31,61 +34,69 @@ Write-Host ""
 
 # The server releases the model it loaded during a graceful shutdown, so ask
 # it to stop rather than killing the process mid-cleanup.
-Write-HorizonStep 'Step 1 of 3: stopping the local website...'
-$state = Get-HorizonRuntimeState -Config $config
+Write-HorizonStep 'Step 1 of 2: stopping the local website...'
 if ($state -and $state.pid) {
     $process = Get-Process -Id $state.pid -ErrorAction SilentlyContinue
     if ($process -and $process.ProcessName -eq 'node') {
         $stopped = $false
         if ($state.url) {
             try {
-                Invoke-RestMethod -Uri "$($state.url)/api/shutdown" -Method Post -TimeoutSec 10 | Out-Null
+                $webUrl = Assert-LoopbackEndpoint -Endpoint ([string]$state.url)
+                Invoke-RestMethod -Uri "$webUrl/api/shutdown" -Method Post -TimeoutSec 10 | Out-Null
                 for ($i = 0; $i -lt 50; $i++) {
                     Start-Sleep -Milliseconds 400
                     if (-not (Get-Process -Id $state.pid -ErrorAction SilentlyContinue)) { $stopped = $true; break }
                 }
             } catch {
-                # Fall through to stopping it directly.
+                Write-HorizonDetail "Graceful website shutdown was not confirmed: $($_.Exception.Message)"
             }
         }
         if (-not $stopped) {
-            Stop-Process -Id $state.pid -ErrorAction SilentlyContinue
-            Write-HorizonDetail 'The website did not shut down cleanly, so it was stopped directly.'
+            try {
+                Stop-Process -Id $state.pid -ErrorAction Stop
+                for ($i = 0; $i -lt 10; $i++) {
+                    Start-Sleep -Milliseconds 500
+                    if (-not (Get-Process -Id $state.pid -ErrorAction SilentlyContinue)) { $stopped = $true; break }
+                }
+            } catch {
+                Write-Host "  Could not stop the website process: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
         }
-        Write-HorizonOk "Website stopped (was running at $($state.url))."
+        if (-not (Get-Process -Id $state.pid -ErrorAction SilentlyContinue)) { $stopped = $true }
+        if ($stopped) {
+            Write-HorizonOk "Website stopped (was running at $($state.url))."
+            Remove-HorizonRuntimeState -Config $config
+        } else {
+            Write-Host "  The website process $($state.pid) is still running; its runtime state was retained for another stop attempt." -ForegroundColor Yellow
+        }
     } else {
         Write-HorizonDetail 'The website was already stopped.'
+        Remove-HorizonRuntimeState -Config $config
     }
-    Remove-HorizonRuntimeState -Config $config
 } else {
     Write-HorizonDetail 'No running website was recorded. If a window is still open, press Ctrl+C in it.'
 }
 
-Write-HorizonStep "Step 2 of 3: unloading the model '$ModelAlias'..."
-if ($provider -eq 'ollama') {
-    if (Get-Command ollama -ErrorAction SilentlyContinue) {
-        ollama stop $ModelAlias 2>&1 | Out-Null
-        Write-HorizonOk 'Model unloaded from memory.'
-    } else {
-        Write-HorizonDetail 'The ollama command is not available, so nothing to unload.'
-    }
-} elseif (Get-Command foundry -ErrorAction SilentlyContinue) {
-    foundry model unload $ModelAlias
-    Write-HorizonOk 'Model unloaded from memory.'
+Write-HorizonStep "Step 2 of 2: unloading the Ollama model '$ModelAlias'..."
+if (-not (Test-OllamaService -BaseUrl $ollamaBase)) {
+    Write-HorizonDetail 'Ollama is not responding at the configured loopback endpoint; nothing was unloaded.'
 } else {
-    Write-HorizonDetail 'The foundry command is not available, so nothing to unload.'
+    try {
+        $loaded = @((Invoke-RestMethod -Uri "$ollamaBase/api/ps" -Method Get -TimeoutSec 10).models)
+        $loadedName = Resolve-OllamaModel -Models $loaded -Alias $ModelAlias
+        if (-not $loadedName) {
+            Write-HorizonDetail "Model '$ModelAlias' is not currently loaded."
+        } else {
+            $body = @{ model = $loadedName; prompt = ''; stream = $false; keep_alive = 0 } | ConvertTo-Json -Depth 4
+            Invoke-RestMethod -Uri "$ollamaBase/api/generate" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 120 | Out-Null
+            Write-HorizonOk 'Model unloaded from memory.'
+        }
+    } catch {
+        Write-Host "  Could not unload the model: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
-Write-HorizonStep 'Step 3 of 3: stopping the model service...'
-if ($provider -eq 'ollama') {
-    Write-HorizonDetail 'Ollama is left running. It frees idle models by itself; quit it from the system tray if you want it gone.'
-} elseif ($KeepService) {
-    Write-HorizonDetail 'Left running because -KeepService was specified.'
-} elseif (Get-Command foundry -ErrorAction SilentlyContinue) {
-    foundry server stop
-    Write-HorizonOk 'Foundry service stopped.'
-}
-
+Write-HorizonDetail 'Ollama is left running; stop it from its own application if you want to close the service.'
 Write-Host ""
-Write-HorizonOk 'Everything is shut down.'
+Write-HorizonOk 'Horizon has been shut down.'
 Write-Host ""

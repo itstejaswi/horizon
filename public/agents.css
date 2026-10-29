@@ -129,6 +129,7 @@
 .status-completed { background: var(--success-bg); color: var(--success-fg); }
 .status-failed { background: var(--danger-bg); color: var(--danger-fg); }
 .status-awaiting_approval { background: var(--warning-bg); color: var(--warning-fg); }
+.status-awaiting_user { background: var(--warning-bg); color: var(--warning-fg); }
 .agent-run-text {
   max-height: 260px;
   overflow: auto;

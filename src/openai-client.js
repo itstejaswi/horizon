@@ -7,7 +7,7 @@ const { isLoopbackHost } = require("./net");
 // independent of how a runtime is installed, started or asked to download a
 // model, which is why it lives apart from the provider modules.
 //
-// `label` names the runtime in error text ("Foundry", "Ollama") and `reachName`
+// `label` names the runtime in error text and `reachName`
 // is what the user would recognise as the thing to start when it is down.
 function createClient({ label, reachName = label }) {
   function assertLoopback(baseUrl) {

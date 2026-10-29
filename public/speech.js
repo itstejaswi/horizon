@@ -1,6 +1,6 @@
 "use strict";
 
-// Browser/Windows voices only. No Foundry or server speech endpoint is used.
+// Browser/Windows voices only. No server speech endpoint is used.
 window.HorizonSpeech = (() => {
   const KEY = "horizon.speech.preferences";
   const MAX_TEXT = 12000;
@@ -250,7 +250,7 @@ window.HorizonSpeech = (() => {
   function mountSettings(parent) {
     const root = node("section", "settings-card");
     root.append(node("h3", "settings-card-title", "Read aloud"),
-      node("p", "settings-card-sub", "Optional local-only speech supplied by Windows/browser voices, not Foundry Local. Reply text stays in the browser's local speech engine; no server speech API or microphone is used."));
+      node("p", "settings-card-sub", "Optional local-only speech supplied by Windows/browser voices. Reply text stays in the browser's local speech engine; no server speech API or microphone is used."));
     const body = node("div", "settings-card-body");
     const field = node("div", "field");
     const label = node("label", "", "Local voice");

@@ -4,7 +4,7 @@
 
   const TOOL_NAMES = [
     "file_list", "file_read", "file_search", "file_write",
-    "command_run", "browser_open", "browser_snapshot", "browser_click",
+    "command_run", "browser_open", "browser_search", "browser_snapshot", "browser_click",
     "browser_fill", "browser_close", "mcp_list_tools", "mcp_call_tool"
   ];
   const ACTIVE = new Set(["queued", "running", "awaiting_approval"]);
@@ -324,7 +324,7 @@
       field("Maximum steps", maxSteps),
       field("Timeout (ms)", timeout),
       field("Allowed tools JSON", tools, `Tool names: ${TOOL_NAMES.join(", ")}. Default capabilities are read-only file tools.`),
-      field("Unattended tools JSON", unattended, "Explicitly grants listed tools to run without approval. Use only for tools you trust."),
+      field("Unattended tools JSON", unattended, "Only public read-only browser tools and MCP tool listings can use unattended grants. Writes, commands, MCP calls, arbitrary clicks and fills always require human approval, including scheduled runs. File reads within granted folders are already automatic."),
       field("Fixed workflow steps JSON", steps, stepsHelp),
       stepExamples,
       scheduleToggle,
@@ -533,7 +533,7 @@
     executionEnabled.querySelector("input").name = "executionEnabled";
     form.append(executionEnabled);
     const planning = checkbox("Plan and verify native tasks", settings.planning === true, value => { settings.planning = value; },
-      "Experimental and model-dependent. Off by default: keeps the existing lightweight loop. Adds local inference to plan model-driven native-engine agents and conversations before execution, then checks configured outcomes. Small models may misformat valid tasks or ask unnecessary clarification; the engine stops and reports errors rather than relaxing checks. Fixed workflows remain the predictable option. A plan does not grant permission or replace approval; passing checks is not proof of the whole task's intent.");
+      "Experimental and model-dependent. Plans model-driven saved agents only, never ordinary conversations or fixed workflows. A plan does not grant permission or replace approval; passing checks is not proof of the whole task's intent.");
     planning.querySelector("input").name = "planning";
     form.append(planning);
     const flags = node("div", "agent-settings-flags");
@@ -550,18 +550,18 @@
     const chat = settings.chat;
     form.append(node("div", "agent-section-head", "Tools in the normal conversation"));
     const conversation = checkbox("Let ordinary chat prompts use tools", chat.enabled, value => { chat.enabled = value; },
-      "No separate agent is needed. With the master switch and a tool feature enabled, the model can request permitted tools from any normal prompt, including dictated text. File reads use your folder grant; all other calls need an in-chat approval.");
+      "No separate agent is needed. Ordinary chat uses native text/function calls, without a JSON classifier or mandatory plan. Granted file reads and public browsing/search do not repeatedly ask by default; change this per conversation using Tools available. Writes, commands, MCP, arbitrary clicks and fills always ask.");
     conversation.querySelector("input").name = "chatEnabled";
     form.append(conversation);
     const protocol = node("select", "agent-input");
     protocol.name = "chatProtocol";
-    for (const [value, label] of [["structured", "Structured actions"], ["native", "Native tool calls"]]) {
+    for (const [value, label] of [["native", "Native tool calls"]]) {
       const option = node("option", "", label);
       option.value = value;
       protocol.append(option);
     }
     protocol.value = chat.protocol;
-    form.append(field("Conversation tool protocol", protocol, "Choose a protocol the selected model can follow. Ordinary text chat stays unchanged when conversation tools are off."));
+    form.append(field("Conversation tool protocol", protocol, "Ordinary conversations use native assistant text or function calls. Saved agents retain their independent protocol."));
     const chatTools = node("fieldset", "agent-settings-flags");
     chatTools.append(node("legend", "", "Tools ordinary prompts may request"));
     for (const name of TOOL_NAMES) {

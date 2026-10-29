@@ -19,10 +19,16 @@
     thinking: "Thinking", answering: "Writing a reply", queued: "Queued",
     approval: "Waiting for your approval", completed: "Done", failed: "Failed",
     cancelled: "Stopped", interrupted: "Interrupted", skipped: "Skipped",
+    handoff: "Waiting for you", continuing: "Continuation queued", continued: "Continued",
     stopping: "Cancellation requested", acting: "Using a tool",
     planning: "Planning native tasks", verifying: "Checking an outcome"
   };
   function describe(run) {
+    if (run.status === "awaiting_user" && run.handoff) {
+      if (run.handoff.resumedAt) return { phase: "completed", label: labels.continued };
+      if (run.handoff.resumeRequestedAt) return { phase: "queued", label: labels.continuing };
+      return { phase: "handoff", label: labels.handoff };
+    }
     if (run.status === "awaiting_approval") return { phase: "approval", label: labels.approval };
     if (run.status !== "running") return { phase: run.status, label: labels[run.status] || "Unknown state" };
     const last = run.events?.at(-1);
@@ -30,7 +36,7 @@
       return { phase: "planning", label: labels.planning };
     }
     if (last?.type === "verifying") return { phase: "verifying", label: labels.verifying };
-    if (last?.type === "retry") return { phase: "reading", label: "Retrying a transient read-only failure" };
+    if (last?.type === "retry") return { phase: "reading", label: "Retrying" };
     if (last?.type === "verified") return { phase: "verifying", label: "Outcome check recorded" };
     if (last?.type === "step") return { phase: "acting", label: "Executing a planned step" };
     if (last?.type === "tool") {

@@ -17,8 +17,8 @@ const { test } = require("node:test");
 
 const ROOT = path.join(__dirname, "..");
 const { createOllama, isSafeAlias } = require(path.join(ROOT, "src", "ollama.js"));
-const { createProvider } = require(path.join(ROOT, "src", "providers.js"));
-const { loadConfig } = require(path.join(ROOT, "src", "config.js"));
+const { createProvider, PROVIDERS } = require(path.join(ROOT, "src", "providers.js"));
+const { loadConfig, localPath } = require(path.join(ROOT, "src", "config.js"));
 
 function startStubOllama({ completion } = {}) {
   const calls = [];
@@ -93,6 +93,26 @@ function startStubOllama({ completion } = {}) {
 
 const baseOf = stub => `http://127.0.0.1:${stub.port}`;
 
+test("ollama: agent requests retain all current system instructions and bound Qwen thinking without mutating history", async () => {
+  const stub = await startStubOllama();
+  try {
+    const provider = createOllama({});
+    const body = { model: "qwen3:1.7b", messages: [
+      { role: "system", content: "Initial policy." }, { role: "user", content: "Current request." },
+      { role: "system", content: "Current observed evidence and correction." }
+    ] };
+    const original = JSON.stringify(body);
+    await provider.agentCompletion(`${baseOf(stub)}/v1`, body, new AbortController().signal);
+    const sent = stub.calls.at(-1).body;
+    assert.equal(sent.messages.filter(message => message.role === "system").length, 1);
+    assert.match(sent.messages[0].content, /Initial policy[\s\S]*Current observed evidence/);
+    assert.equal(sent.messages.at(-1).content, "Current request.\n/no_think");
+    assert.equal(JSON.stringify(body), original);
+    await provider.agentCompletion(`${baseOf(stub)}/v1`, { ...body, model: "stub:3b" }, new AbortController().signal);
+    assert.equal(stub.calls.at(-1).body.messages.at(-1).content, "Current request.");
+  } finally { stub.server.close(); }
+});
+
 test("ollama names: accepts library, tagged and Hugging Face names; rejects unsafe ones", () => {
   for (const good of ["llama3.2", "qwen2.5:3b", "hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", "phi4-mini"]) {
     assert.equal(isSafeAlias(good), true, `must accept: ${good}`);
@@ -102,25 +122,44 @@ test("ollama names: accepts library, tagged and Hugging Face names; rejects unsa
   }
 });
 
-test("providers: config selects the runtime and rejects unknown ones", () => {
-  assert.equal(createProvider({ provider: "foundry" }).name, "foundry");
+test("providers: config supports Ollama only and rejects removed or unknown runtimes", t => {
+  const existsSync = fs.existsSync;
+  t.mock.method(fs, "existsSync", file => file === localPath ? false : existsSync(file));
+  assert.deepEqual(PROVIDERS, ["ollama"]);
+  assert.equal(createProvider({}).name, "ollama");
   assert.equal(createProvider({ provider: "ollama", ollama: {} }).name, "ollama");
+  assert.throws(() => createProvider({ provider: "foundry" }), /Unknown model provider/);
   assert.throws(() => createProvider({ provider: "nope" }), /Unknown model provider/);
 
   const fallback = loadConfig([], {});
-  assert.equal(fallback.provider, "foundry");
+  assert.equal(fallback.provider, "ollama");
+  assert.equal(fallback.model.alias, "qwen3:1.7b");
+  assert.equal("foundry" in fallback, false);
+  assert.equal("dictation" in fallback, false);
   const ollama = loadConfig(["--provider=ollama"], {});
   assert.equal(ollama.provider, "ollama");
-  assert.equal(ollama.model.alias, "llama3.2:3b", "Ollama must not inherit a Foundry-only default model");
+  assert.equal(ollama.model.alias, fallback.model.alias, "selecting Ollama must preserve the configured model");
   assert.equal(loadConfig(["--provider=ollama", "--model-alias=qwen2.5:3b"], {}).model.alias, "qwen2.5:3b");
+  assert.throws(() => loadConfig(["--provider=foundry"], {}), /Invalid model provider/);
   assert.throws(() => loadConfig(["--provider=nope"], {}), /Invalid model provider/);
 });
 
-test("ollama: both providers expose the same surface", () => {
-  const foundry = createProvider({ provider: "foundry" });
+test("ollama: exposes the runtime, model-management and completion surface used by Horizon", () => {
   const ollama = createProvider({ provider: "ollama", ollama: {} });
-  const missing = Object.keys(foundry).filter(key => key !== "ENDPOINT_PATTERN" && !(key in ollama));
-  assert.deepEqual(missing, [], `ollama is missing: ${missing.join(", ")}`);
+  assert.equal(ollama.name, "ollama");
+  assert.equal(ollama.label, "Ollama");
+  assert.equal(ollama.loadsOnDemand, true);
+  for (const method of [
+    "isSafeAlias", "variantName", "mergeLoadState", "loadHint",
+    "isInstalled", "serverStatus", "startServer", "stopServer", "restartServer",
+    "settings", "setSetting", "catalogue", "cachedModels", "processMemory",
+    "endpointAlive", "isModelLoaded", "isModelAvailable", "ensureLoaded",
+    "downloadModel", "removeModel", "loadModel", "unloadModel", "discoverEndpoint",
+    "assertLoopback", "listModels", "selectModel", "resolveModelId",
+    "chatCompletion", "chatCompletionStream", "agentCompletion", "parseServerSentEvents"
+  ]) {
+    assert.equal(typeof ollama[method], "function", `Ollama must expose ${method}`);
+  }
 });
 
 test("ollama: discovers the endpoint and reports status", async () => {
@@ -253,6 +292,9 @@ test("ollama: remove deletes the model and reports failures", async () => {
 });
 
 test("ollama: refuses a non-loopback endpoint, naming Ollama", () => {
+  assert.throws(() => createOllama({ baseUrl: "http://example.com" }), /non-loopback Ollama endpoint/);
+  assert.throws(() => createOllama({ baseUrl: "http://user:password@localhost:11434" }), /without credentials/);
+  assert.throws(() => createOllama({ baseUrl: "http://localhost:11434/proxy" }), /without credentials, path/);
   const ollama = createOllama({});
   assert.throws(() => ollama.assertLoopback("http://example.com/v1"), /non-loopback Ollama endpoint/);
   assert.doesNotThrow(() => ollama.assertLoopback("http://127.0.0.1:11434/v1"));
@@ -297,6 +339,7 @@ const ollamaEnv = (stub, alias) => ({
   HORIZON_PROVIDER: "ollama",
   HORIZON_OLLAMA_URL: baseOf(stub),
   HORIZON_MODEL_ALIAS: alias,
+  HORIZON_MODEL_ID: alias,
   HORIZON_PORT: "0",
   HORIZON_OPEN_BROWSER: "false",
   HORIZON_WARM_UP: "false",
@@ -328,7 +371,7 @@ test("ollama: the server serves chat and model management through the provider",
     assert.ok(models.models.some(model => model.alias === "stub:3b"));
     assert.ok(!models.models.some(model => model.alias === "nomic-embed-text:latest"), "embedding models are not offered for chat");
 
-    const downloaded = await fetch(`${app.url}/api/foundry/download`, {
+    const downloaded = await fetch(`${app.url}/api/ollama/download`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ alias: "tiny:1b" })
@@ -336,14 +379,27 @@ test("ollama: the server serves chat and model management through the provider",
     assert.equal(downloaded.status, 200);
     assert.ok(stub.installed.has("tiny:1b"));
 
-    const info = await (await fetch(`${app.url}/api/foundry`)).json();
+    const info = await (await fetch(`${app.url}/api/ollama`)).json();
     assert.equal(info.installed, true);
     assert.equal(info.running, true);
     assert.equal(info.provider.label, "Ollama");
 
-    const dictation = await (await fetch(`${app.url}/api/dictation`)).json();
-    assert.equal(dictation.available, false);
-    assert.match(dictation.reason, /Foundry Local/);
+    const settings = await (await fetch(`${app.url}/api/ollama/settings`)).json();
+    assert.deepEqual(settings.settings, [], "Ollama has no portable daemon settings to edit");
+    const catalogue = await (await fetch(`${app.url}/api/ollama/catalogue?cached=1`)).json();
+    assert.ok(catalogue.models.some(model => model.alias === "stub:3b" && model.cached));
+    const progress = await (await fetch(`${app.url}/api/ollama/progress`)).json();
+    assert.deepEqual(progress.downloads, {}, "a finished pull must not remain in progress");
+
+    for (const endpoint of ["/api/dictation", "/api/dictation/events"]) {
+      assert.equal((await fetch(app.url + endpoint)).status, 404, `${endpoint} must be removed`);
+    }
+    const dictation = await fetch(`${app.url}/api/dictation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "record" })
+    });
+    assert.equal(dictation.status, 404, "recording must not be available in the Ollama-only build");
   } finally {
     app.child.kill();
     stub.server.close();
@@ -392,6 +448,7 @@ test("ollama: Horizon Native executes a real file tool through function calls an
     assert.equal(finished.verification.status, "not_configured");
     const requests = stub.calls.filter(call => call.url === "/v1/chat/completions");
     assert.equal(requests.length, 2);
+    assert.equal(requests[0].body.response_format, undefined);
     assert.equal(requests[0].body.tools[0].function.name, "file_read");
     assert.match(requests[1].body.messages.at(-1).content, /Evidence from the actual file/);
     assert.ok(finished.events.some(event => event.type === "backend" && /Horizon Native/.test(event.message)));
