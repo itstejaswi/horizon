@@ -8,7 +8,7 @@ const vm = require("node:vm");
 
 const script = fs.readFileSync(path.join(__dirname, "..", "tools", "setup-agent-runtime.js"), "utf8");
 
-function setup({ installed = false, status = 0, args = [] } = {}) {
+function setup({ installed = false, status = 0, args = [], missingGraph = false } = {}) {
   const calls = [], errors = [], logs = [];
   const process = { argv: ["node", "setup-agent-runtime.js", ...args], execPath: "test-node", exitCode: 0 };
   const fakeRequire = name => {
@@ -23,7 +23,10 @@ function setup({ installed = false, status = 0, args = [] } = {}) {
     } };
     throw new Error(`Unexpected dependency ${name}`);
   };
-  fakeRequire.resolve = name => name === "node-pty" ? "node-pty" : require.resolve(name);
+  fakeRequire.resolve = name => {
+    if (missingGraph && name === "@langchain/langgraph") throw new Error("Missing graph dependency.");
+    return require.resolve(name);
+  };
   vm.runInNewContext(script, {
     require: fakeRequire, process,
     console: { log: message => logs.push(message), error: message => errors.push(message) }
@@ -49,6 +52,12 @@ test("setup check mode never downloads and reports missing or existing Chromium 
     assert.equal(result.process.exitCode, installed ? 0 : 1);
     assert.equal(result.calls.length, 0);
   }
+});
+
+test("existing installs with a missing graph trigger dependency setup rather than claiming readiness", () => {
+  const result = setup({ installed: true, missingGraph: true, args: ["--check"] });
+  assert.equal(result.process.exitCode, 1);
+  assert.equal(result.calls.length, 0);
 });
 
 test("failed browser installation surfaces failure without claiming runtime readiness", () => {

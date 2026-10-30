@@ -5,7 +5,9 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 function check() {
-  require.resolve("node-pty");
+  require.resolve("@langchain/langgraph");
+  require.resolve("@langchain/core");
+  require.resolve("zod");
   const { chromium } = require("playwright");
   return fs.existsSync(chromium.executablePath());
 }

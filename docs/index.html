@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Horizon — a private AI workspace built for Microsoft Foundry Local</title>
-<meta name="description" content="A local-first personal AI tool for Windows. Chats, memory, optional tools and scheduled agents, with Microsoft Foundry Local managed for you. No paid inference API.">
+<title>Horizon — a private local AI workspace using Ollama</title>
+<meta name="description" content="A local-first personal AI tool for Windows. Chats, memory, optional tools and scheduled agents, with Ollama for local inference. No paid inference API.">
 <meta name="color-scheme" content="dark">
 
 <meta property="og:title" content="Horizon — your models, running on your machine">
-<meta property="og:description" content="A local-first personal AI tool with optional agents and automations, built for Microsoft Foundry Local.">
+<meta property="og:description" content="A local-first personal AI tool with optional agents and automations, using Ollama for inference.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://itstejaswi.github.io/horizon/assets/social-preview.jpg">
 
@@ -69,9 +69,12 @@
     </svg>
     <h1>Your models,<br>running on your machine.</h1>
     <span class="hero-claim">Local inference · No paid inference API · Optional tools, off by default</span>
-    <p>A local-first personal AI tool built for Microsoft Foundry Local — chat,
+    <p>A local-first personal AI tool using Ollama for local inference — chat,
        documents, prompts, memory, reusable agents and scheduled workflows.
        Local inference stays on your hardware; enabled external tools may use the network.</p>
+    <p class="fine">Runtime status: Ollama-only source plumbing is not yet
+       runtime-validated. Acceptance must be completed in an isolated approved
+       environment before relying on this update.</p>
     <div class="cta">
       <a class="btn btn-primary" href="https://github.com/itstejaswi/horizon">View on GitHub</a>
       <a class="btn btn-ghost" href="#install">How to install</a>
@@ -113,12 +116,12 @@
             <path d="M10 2.6a2.7 2.7 0 0 1 2.7 2.7v4.6a2.7 2.7 0 0 1-5.4 0V5.3A2.7 2.7 0 0 1 10 2.6z" stroke-linejoin="round"/>
             <path d="M4.6 9.9a5.4 5.4 0 0 0 10.8 0M10 15.3v2.1"/>
           </svg>
-          Your voice stays here
+          Local inference
         </h3>
-        <p>Dictation runs on a speech model on this machine. What you say lands in the
-           message box for you to read before anything is sent. Replies can be read
-           aloud using verified-local Windows/browser voices, with automatic reading
-           off by default and no cloud voice fallback.</p>
+        <p>Ollama serves the selected model on loopback. Horizon owns the agent
+           harness and tool permissions; the Human remains in control through
+           the web UI. Replies can be read aloud with verified-local browser
+           voices, without microphone recording or a cloud voice fallback.</p>
       </div>
       <div class="card card-accent">
         <h3>
@@ -140,61 +143,13 @@
 <section id="look">
   <div class="wrap">
     <h2>A look inside</h2>
-    <p class="lede">Real screenshots, on real hardware. Nothing tidied up afterwards —
-       click any of them to see it full size.</p>
-
-    <div class="shots">
-      <figure>
-        <a class="shot-open" href="#shot-dictation" aria-label="Enlarge: dictation and page reading">
-          <img src="assets/horizon-dictation.jpg" alt="Horizon reading a news page and answering it, while a red banner reads Listening and dictated words appear in the message box." loading="lazy">
-        </a>
-        <figcaption>A page fetched and summarised, and the next question spoken rather
-          than typed. The banner and clock are there because the microphone is open.</figcaption>
-      </figure>
-
-      <div class="rule" aria-hidden="true"></div>
-
-      <figure>
-        <a class="shot-open" href="#shot-reasoning" aria-label="Enlarge: a model showing its working">
-          <img src="assets/horizon-reasoning.jpg" alt="A reply from qwen3-0.6b with an expanded panel headed Thought for 8.5s showing the model's working, and the answer beneath it." loading="lazy">
-        </a>
-        <figcaption>A model that shows its working, kept apart from the answer, with the
-          time it took.</figcaption>
-      </figure>
-
-      <div class="rule" aria-hidden="true"></div>
-
-      <figure>
-        <a class="shot-open" href="#shot-shutdown" aria-label="Enlarge: the shutdown dialog">
-          <img src="assets/horizon-shutdown.jpg" alt="A dialog headed Shut down Horizon explaining that the model is held in memory by the Foundry service, with a checkbox to also stop that service." loading="lazy">
-        </a>
-        <figcaption>Closing the window would orphan the model in memory. Horizon says so,
-          and offers to give it back.</figcaption>
-      </figure>
-    </div>
+    <p class="lede">Earlier interface screenshots are omitted because they show retired
+       controls and do not validate the current Ollama-only runtime.</p>
 
     <p class="lede" style="margin-top:26px">There is more than fits here.
       <a href="guide.html">The user guide</a> walks through the lot.</p>
   </div>
 </section>
-
-<!-- Opened by :target, so enlarging a screenshot costs no JavaScript. Each one
-     is hidden until it is the target, and any click closes it. -->
-<div class="lightbox" id="shot-dictation">
-  <a class="close" href="#look" aria-label="Close"></a>
-  <a class="close-mark" href="#look" aria-hidden="true">&times;</a>
-  <img src="assets/horizon-dictation.jpg" alt="Horizon reading a news page while dictation is recording.">
-</div>
-<div class="lightbox" id="shot-reasoning">
-  <a class="close" href="#look" aria-label="Close"></a>
-  <a class="close-mark" href="#look" aria-hidden="true">&times;</a>
-  <img src="assets/horizon-reasoning.jpg" alt="A reply with the model's reasoning shown in its own panel.">
-</div>
-<div class="lightbox" id="shot-shutdown">
-  <a class="close" href="#look" aria-label="Close"></a>
-  <a class="close-mark" href="#look" aria-hidden="true">&times;</a>
-  <img src="assets/horizon-shutdown.jpg" alt="The shutdown dialog, offering to stop the Foundry service too.">
-</div>
 
 <section id="fit">
   <div class="wrap">
@@ -203,16 +158,14 @@
     <div class="grid cols-2">
       <div class="card">
         <h3>Use Open WebUI or AnythingLLM if…</h3>
-        <p>…you want one interface across many providers — OpenAI, Anthropic, Ollama,
-           Foundry Local. Both are mature and have far more features than this. Point
-           them at Foundry Local's endpoint and they work.</p>
+        <p>…you want one interface across many providers — OpenAI, Anthropic, Ollama
+           and others. Both are mature and have far more features than this.</p>
       </div>
       <div class="card card-accent">
         <h3>Use Horizon if…</h3>
-        <p>…you want the opposite trade: one runtime, understood properly. It starts and
-           stops the service, loads and unloads models, finds the port again when
-           Foundry restarts, and gives the memory back when you are done. No Docker, no
-           Electron.</p>
+        <p>…you want one local inference runtime and a Horizon-owned agent harness.
+           Ollama supplies inference; Horizon controls tool grants, approvals and run
+           state. No Docker, no Electron.</p>
       </div>
     </div>
   </div>
@@ -221,19 +174,16 @@
 <section id="how">
   <div class="wrap">
     <h2>How it works</h2>
-    <p class="lede">All of it local. Your browser never talks to Foundry directly — it
-       only talks to the small Node.js server in the project folder.</p>
+    <p class="lede">Local inference. Your browser talks only to Horizon's Node.js
+       server, which sends requests to Ollama on loopback.</p>
     <div class="chain">
       browser<br>
       &nbsp;&nbsp;&#8627; <b>127.0.0.1:3000</b> &nbsp;&nbsp;Horizon's Node.js server<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#8627; <b>127.0.0.1:&lt;auto&gt;</b> &nbsp;&nbsp;Foundry REST API &nbsp;&rarr;&nbsp; <b>the model</b> &nbsp;&nbsp;CPU, GPU or NPU<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#8627; <b>pseudo terminal</b> &nbsp;&nbsp;<code>foundry transcribe</code> &nbsp;&rarr;&nbsp; <b>your microphone</b> &nbsp;&nbsp;dictation only
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#8627; <b>127.0.0.1:11434</b> &nbsp;&nbsp;Ollama native API &nbsp;&rarr;&nbsp; <b>the selected model</b> &nbsp;&nbsp;CPU or GPU
     </div>
-    <p class="lede" style="margin-top:26px">Foundry picks a new port on every restart.
-       Horizon finds it again mid-session, without losing your conversation.</p>
-    <p class="lede">Dictation takes the second branch because Foundry offers it only as a
-       command, not over HTTP. Foundry opens the microphone, not the page, so your
-       browser shows no recording indicator — Horizon shows its own.</p>
+    <p class="lede" style="margin-top:26px">Horizon defaults to the Ollama loopback
+       service and the <code>qwen3:1.7b</code> model. Horizon's Node.js runtime owns
+       orchestration and the Human at the web UI remains the authority.</p>
     <p class="lede">Ordinary prompts can use permitted tools directly, with inline activity
        and per-call approval for anything beyond read-only file access. Configure access
        once in Agents settings; no saved agent is needed for conversation tools.</p>
@@ -246,14 +196,10 @@
        read results. Only explicitly transient read-only failures may retry once, within
        the run's call budget. Existing permissions and approvals are unchanged. This is
        not adaptive replanning or general semantic proof that a request was fulfilled.</p>
-    <p class="lede">OpenClaw is not bundled or connected. The permission-preserving broker
-       and backend routing seam are retained, but no CLI/plugin adapter is wired.
-       Runtime provisioning, adapter implementation and verified integration must happen
-       in a permitted environment and follow device and organisation policies.
-       Horizon's native engine is the supported default.</p>
-    <p class="lede">Read aloud uses local voices exposed by Windows and your browser,
-       not a Foundry Local TTS endpoint. Foundry Local 0.12.1 provides transcription;
-       cloud Microsoft Foundry Speech is a separate service and is not used.</p>
+    <p class="lede">OpenClaw is not installed or executed as a runtime. Only selected
+       source patterns inform the Horizon-owned harness. Read aloud is independent
+       local browser/Windows speech synthesis; microphone recording and dictation are
+       not provided.</p>
   </div>
 </section>
 
@@ -277,15 +223,15 @@
             <h3>Install the two pieces</h3>
             <p>Download and run each installer. Both links go to the official source:</p>
             <p class="src-links">
-              <a href="https://learn.microsoft.com/en-us/azure/foundry-local/get-started">
+              <a href="https://ollama.com/download">
                 <svg class="src-mark" viewBox="0 0 20 20" aria-hidden="true">
                   <rect x="2.2" y="2.2" width="7.2" height="7.2" fill="#F25022"/>
                   <rect x="10.6" y="2.2" width="7.2" height="7.2" fill="#7FBA00"/>
                   <rect x="2.2" y="10.6" width="7.2" height="7.2" fill="#00A4EF"/>
                   <rect x="10.6" y="10.6" width="7.2" height="7.2" fill="#FFB900"/>
                 </svg>
-                Microsoft Foundry Local</a>
-              <span class="src">learn.microsoft.com</span><br>
+                Ollama</a>
+              <span class="src">ollama.com</span><br>
               <a href="https://nodejs.org">
                 <svg class="src-mark" viewBox="0 0 20 20" aria-hidden="true">
                   <path d="M10 1.4 18 6v8l-8 4.6L2 14V6z" fill="none" stroke="#5FA04E" stroke-width="1.7" stroke-linejoin="round"/>
@@ -294,7 +240,8 @@
                 Node.js</a> — choose the <strong>LTS</strong> version
               <span class="src">nodejs.org</span>
             </p>
-            <p class="note">Accept the defaults in both, and restart if either asks.</p>
+            <p class="note">Install Ollama and Node.js 20 or later. Accept the
+               installer defaults and restart if either asks.</p>
           </div>
         </div>
 
@@ -327,7 +274,9 @@
             <h3>Double-click <span class="kbd">Start Horizon.bat</span></h3>
             <p>A small black window opens — that is the server, and it stays open while
                Horizon runs. Your browser opens at <span class="kbd">http://127.0.0.1:3000</span>.</p>
-            <p class="note">The page walks you through choosing and downloading a model.
+            <p class="note">Before the first chat, run <code>Setup-Horizon.ps1</code>
+               once from PowerShell to check prerequisites and prepare the configured
+               <code>qwen3:1.7b</code> model.
                If Windows says <em>“Windows protected your PC”</em>, click
                <strong>More info</strong> &rarr; <strong>Run anyway</strong>.</p>
             <p class="warn"><strong>Do not close that black window to quit.</strong> It is
@@ -351,9 +300,10 @@
           <div class="step-n">1</div>
           <div class="step-b">
             <h3>Dependencies</h3>
-            <pre>winget install Microsoft.FoundryLocal
-winget install OpenJS.NodeJS.LTS</pre>
-            <p class="note">No <code>winget</code>? It ships with Windows 11 and recent
+            <pre>winget install OpenJS.NodeJS.LTS</pre>
+            <p class="note">Install Ollama separately from
+               <a href="https://ollama.com/download">ollama.com/download</a>. No
+               <code>winget</code>? It ships with Windows 11 and recent
                Windows 10, but not every machine has it. Use the installers in the
                column on the left instead — same software, same sources.</p>
           </div>
@@ -366,8 +316,8 @@ winget install OpenJS.NodeJS.LTS</pre>
             <pre>git clone https://github.com/itstejaswi/horizon
 cd horizon
 .\"Start Horizon.bat"</pre>
-            <p class="note">Initial setup installs <code>node-pty</code> (the speech terminal
-               dependency), Playwright and its isolated Chromium browser.
+            <p class="note">Initial setup installs Horizon's declared dependencies
+               and its isolated Chromium browser.
                The custom MCP client ships as source with Horizon; it is not installed separately.
                Features remain off until enabled. Configured third-party MCP servers
                are separate programs with their own installation requirements.</p>
@@ -379,8 +329,10 @@ cd horizon
           <div class="step-b">
             <h3>Or use the PowerShell launcher</h3>
             <pre>.\scripts\Start-Horizon.ps1</pre>
-            <p class="note">Same thing, but it also starts Foundry and pre-loads the model so
-               the first message is quick. <code>-WebPort</code>, <code>-ModelAlias</code> and
+            <p class="note">Use <code>Setup-Horizon.ps1</code> to check prerequisites and
+               prepare the configured model. The launcher can start Ollama when configured;
+               Stop unloads Horizon's model but leaves Ollama running.
+               <code>-WebPort</code>, <code>-ModelAlias</code> and
                <code>-NoBrowser</code> are accepted.</p>
           </div>
         </div>
@@ -392,7 +344,8 @@ cd horizon
             <pre>npm test     # regression tests, no model needed
 npm run check
 npm run build</pre>
-            <p class="note">The suite runs against a stub — no model, no GPU, no network.</p>
+            <p class="note">These are acceptance commands for an isolated environment;
+               none were run for this source-only update.</p>
           </div>
         </div>
       </div>
@@ -403,12 +356,12 @@ npm run build</pre>
       <tr><th>Requirement</th><th>Detail</th></tr>
       <tr><td>Windows</td><td>Windows 10 or Windows 11, on Intel/AMD or Arm. macOS support is <a href="https://github.com/itstejaswi/horizon/milestone/1">on the roadmap</a>, not here yet.</td></tr>
       <tr><td>PowerShell</td><td>5.1 or later — already included with Windows</td></tr>
-      <tr><td>Node.js</td><td>18 or later. Setup installs bundled runtime dependencies and Chromium.</td></tr>
-      <tr><td>Foundry Local</td><td>Installed separately. Horizon starts and stops it, but does not install it.</td></tr>
-      <tr><td>RAM</td><td>Minimum 8 GB.</td></tr>
-      <tr><td>Disk</td><td>Allow space for npm dependencies, Chromium, any speech model, and the local models you choose. Browser setup increases the application footprint.</td></tr>
+      <tr><td>Node.js</td><td>20 or later. Setup installs declared runtime dependencies and Chromium.</td></tr>
+      <tr><td>Ollama</td><td>Installed separately. Horizon uses its native loopback API and does not stop the Ollama service.</td></tr>
+      <tr><td>Default model</td><td><code>qwen3:1.7b</code>, served by Ollama on loopback.</td></tr>
+      <tr><td>RAM</td><td>Model needs vary by selection; 8 GB is the target floor, not a validated guarantee.</td></tr>
+      <tr><td>Disk</td><td>Allow space for npm dependencies, Chromium and the local models you choose. Browser setup increases the application footprint.</td></tr>
       <tr><td>Internet</td><td>For initial dependency/browser setup and model downloads; also for any external capabilities you enable.</td></tr>
-      <tr><td>Microphone</td><td>Only for dictation. Off until you switch it on.</td></tr>
     </table>
   </div>
 </section>
@@ -419,13 +372,7 @@ npm run build</pre>
       <a href="https://github.com/itstejaswi/horizon/blob/main/LICENSE">GNU Affero General Public Licence v3</a>.
       Designed and built by <a href="https://itstejaswi.github.io">Tejaswi</a>.
       <a href="https://github.com/itstejaswi/horizon">Source on GitHub</a>.</p>
-    <p class="fine">Microsoft, Azure, Foundry and Foundry Local are trademarks of the
-      Microsoft group of companies, used here only to name the software Horizon connects
-      to. Node.js is a trademark of the OpenJS Foundation. Horizon is not a Microsoft
-      product and is not affiliated with or endorsed by Microsoft. Foundry Local is
-      separate software with its own
-      <a href="https://learn.microsoft.com/en-us/azure/foundry-local/">licence and privacy terms</a>,
-      and is a preview feature. Icons are from
+    <p class="fine">Node.js is a trademark of the OpenJS Foundation. Icons are from
       <a href="https://github.com/microsoft/fluentui-system-icons">Fluent System Icons</a> (MIT).
       All other trademarks belong to their owners, and appear here only to show where a
       download link leads.</p>

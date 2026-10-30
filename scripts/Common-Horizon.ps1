@@ -68,50 +68,124 @@ function Assert-HorizonPrerequisite {
     }
 }
 
-function Get-FoundryEndpoint {
-    $status = (foundry server status 2>&1 | Out-String)
-    $match = [regex]::Match($status, 'https?://(?:127\.0\.0\.1|localhost)(?::\d+)?')
-    if (-not $match.Success) { return $null }
-    return $match.Value.TrimEnd('/')
-}
-
 function Assert-LoopbackEndpoint {
     param([Parameter(Mandatory)][string] $Endpoint)
 
-    $uri = [uri]$Endpoint
-    if ($uri.Host -notin @('127.0.0.1', 'localhost', '::1')) {
-        throw "Refusing a non-loopback Foundry endpoint: $Endpoint. This tool is local-only by design."
+    $uri = $null
+    if (-not [uri]::TryCreate($Endpoint, [System.UriKind]::Absolute, [ref]$uri) -or
+        $uri.Scheme -notin @('http', 'https') -or
+        $uri.UserInfo -or
+        $uri.Query -or
+        $uri.Fragment) {
+        throw "Invalid local service endpoint: $Endpoint."
     }
-    return $Endpoint
+
+    $hostName = $uri.Host -replace '^\[|\]$', ''
+    if ($hostName -notin @('127.0.0.1', 'localhost', '::1')) {
+        throw "Refusing a non-loopback endpoint: $Endpoint. This tool is local-only by design."
+    }
+
+    $baseUrl = $Endpoint.TrimEnd('/')
+    if ($baseUrl -match '/v1$') { $baseUrl = $baseUrl.Substring(0, $baseUrl.Length - 3) }
+    return $baseUrl
 }
 
-function Get-FoundryApiBase {
+function Get-OllamaBaseUrl {
+    param([Parameter(Mandatory)] $Config)
+
+    $baseUrl = if ($env:HORIZON_OLLAMA_URL) {
+        $env:HORIZON_OLLAMA_URL
+    } elseif ($Config.ollama.baseUrl) {
+        "$($Config.ollama.baseUrl)"
+    } else {
+        'http://127.0.0.1:11434'
+    }
+    return Assert-LoopbackEndpoint -Endpoint $baseUrl.TrimEnd('/')
+}
+
+function Test-OllamaService {
     param(
-        [Parameter(Mandatory)][string] $Endpoint,
-        [Parameter(Mandatory)][string] $ApiPrefix
+        [Parameter(Mandatory)][string] $BaseUrl,
+        [int] $TimeoutSec = 2
     )
-    if ($Endpoint.EndsWith($ApiPrefix)) { return $Endpoint }
-    return "$Endpoint$ApiPrefix"
+
+    try {
+        Invoke-RestMethod -Uri "$BaseUrl/api/version" -TimeoutSec $TimeoutSec | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
 }
 
-function Resolve-FoundryModel {
+function Start-HorizonOllamaService {
     param(
-        [Parameter(Mandatory)][string] $ApiBase,
+        [Parameter(Mandatory)][string] $BaseUrl,
+        [int] $WaitSeconds = 10
+    )
+
+    $BaseUrl = Assert-LoopbackEndpoint -Endpoint $BaseUrl
+    if (Test-OllamaService -BaseUrl $BaseUrl) { return $true }
+
+    $command = Get-Command ollama -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $command) { return $false }
+
+    $previousHost = $env:OLLAMA_HOST
+    try {
+        $env:OLLAMA_HOST = ([uri]$BaseUrl).Authority
+        Start-Process -FilePath $command.Source -ArgumentList 'serve' -WindowStyle Hidden
+    } finally {
+        if ($null -eq $previousHost) {
+            Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue
+        } else {
+            $env:OLLAMA_HOST = $previousHost
+        }
+    }
+
+    for ($i = 0; $i -lt ($WaitSeconds * 2); $i++) {
+        if (Test-OllamaService -BaseUrl $BaseUrl) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return (Test-OllamaService -BaseUrl $BaseUrl)
+}
+
+function Get-OllamaModels {
+    param(
+        [Parameter(Mandatory)][string] $BaseUrl,
+        [int] $TimeoutSec = 20
+    )
+
+    $BaseUrl = Assert-LoopbackEndpoint -Endpoint $BaseUrl
+    $response = Invoke-RestMethod -Uri "$BaseUrl/api/tags" -Method Get -TimeoutSec $TimeoutSec
+    return @($response.models)
+}
+
+function Resolve-OllamaModel {
+    param(
+        [Parameter(Mandatory)][object[]] $Models,
         [Parameter(Mandatory)][string] $Alias
     )
 
-    $models = (Invoke-RestMethod -Uri "$ApiBase/models" -Method Get -TimeoutSec 30).data
-    if (-not $models) { throw "Foundry Local returned no models from $ApiBase/models." }
+    $wanted = if ($Alias -notmatch ':') { $Alias + ':latest' } else { $Alias }
+    $match = $Models |
+        Where-Object {
+            $name = if ($_.name) { [string]$_.name } else { [string]$_.model }
+            $name -ieq $Alias -or $name -ieq $wanted
+        } |
+        Select-Object -First 1
+    if (-not $match) { return $null }
+    if ($match.name) { return [string]$match.name }
+    return [string]$match.model
+}
 
-    $match = $models | Where-Object { $_.parent -eq $Alias } | Select-Object -First 1
-    if (-not $match) { $match = $models | Where-Object { $_.id -eq $Alias } | Select-Object -First 1 }
-    if (-not $match) { $match = $models | Where-Object { $_.id -like "$Alias*" } | Select-Object -First 1 }
+function Assert-OllamaModelAlias {
+    param([Parameter(Mandatory)][string] $Alias)
 
-    if (-not $match) {
-        $available = ($models | ForEach-Object { $_.id }) -join ', '
-        throw "No loaded model matches the alias '$Alias'. Loaded models: $available. Load it with: foundry model load $Alias"
+    if ($Alias -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._\-/:]{0,127}$' -or
+        $Alias.Contains('..') -or
+        $Alias.Contains('//')) {
+        throw "Rejected Ollama model name: $Alias"
     }
-    return $match.id
+    return $Alias
 }
 
 function Write-HorizonStep {

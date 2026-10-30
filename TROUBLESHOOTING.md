@@ -1,6 +1,8 @@
 ﻿# Troubleshooting
 
-Start here. Run the health check — it tests all three pieces and tells you which one is unhappy.
+Start here. Run the health check to inspect Horizon, Ollama and model availability.
+This checkout's Ollama-only changes are source-only and have not yet been
+runtime-validated; perform acceptance in an isolated approved environment.
 
 ```powershell
 .\scripts\Test-Horizon.ps1
@@ -35,17 +37,18 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 This lasts until you close the window. Do not make a permanent change unless your organisation permits it.
 
-## "The term 'foundry' is not recognized"
+## Ollama is not installed or the `ollama` command is not recognized
 
-Foundry Local was installed but Windows has not picked up the new command. **Close PowerShell, open a new window**, then check:
+Install Ollama from [ollama.com/download](https://ollama.com/download), then
+close and reopen PowerShell so Windows refreshes `PATH`. Verify:
 
 ```powershell
-foundry --version
+ollama --version
 ```
 
 ## "'node' was not found"
 
-Install Node.js 18 or later from an approved source, then reopen PowerShell. Verify:
+Install Node.js 20 or later from an approved source, then reopen PowerShell. Verify:
 
 ```powershell
 node --version
@@ -55,7 +58,8 @@ node --version
 
 That is intentional, and nothing is broken.
 
-Foundry Local chooses its own port each time it starts. The web server, by default, asks Windows for any free port. Both are discovered at run time, so an address you bookmarked yesterday may not work today.
+Ollama normally listens on `http://127.0.0.1:11434`; Horizon's web server uses
+its own configured port and may choose a free port when configured to do so.
 
 Always use the address printed by `Start-Horizon.ps1`. To keep it constant, set a fixed port in `config.json`:
 
@@ -77,39 +81,39 @@ To see what is holding the port:
 Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue
 ```
 
-## "The Foundry Local endpoint could not be discovered"
+## Ollama is unavailable
 
-The Foundry service is not running. Start it and check:
-
-```powershell
-foundry server restart
-foundry server status
-```
-
-## "No loaded model matches the alias ..."
-
-The model was never downloaded, or is not currently loaded. The message lists what *is* loaded. To fix it:
+Check that Ollama is installed and responding at its configured loopback URL.
+The default is `http://127.0.0.1:11434`; `HORIZON_OLLAMA_URL` overrides it.
+If the service is not running, start it from the Ollama application or run the
+Horizon launcher when `ollama.autoStart` is enabled. Check:
 
 ```powershell
-foundry model list --cached
-foundry model load phi-4
+ollama --version
+ollama list
 ```
 
-If it is not in the cached list, download it first:
+Do not point Horizon at a non-loopback inference service.
+
+## "No model matches the selected ID"
+
+The configured model may not have been pulled yet. The default is
+`qwen3:1.7b`; list installed models and pull the selected one:
 
 ```powershell
-foundry model download phi-4
+ollama list
+ollama pull qwen3:1.7b
 ```
+
+Set `model.alias` in `config.local.json` to select another model, or use
+`HORIZON_MODEL_ID` for a per-process override. This replaces the retired
+`FOUNDRY_MODEL_ID` setting.
 
 ## The page says "Model not ready"
 
-The web server is fine; Foundry is not cooperating. The message under the input box names the exact problem. Usually:
-
-```powershell
-foundry model load phi-4
-```
-
-The page rechecks automatically every twenty seconds.
+The web server may be healthy while Ollama or the selected model is not. Check
+the exact error under the input box and compare `ollama list` with
+`model.alias`/`HORIZON_MODEL_ID`. The page rechecks service health automatically.
 
 ## The page says "Local server unavailable"
 
@@ -137,13 +141,17 @@ Inspect the saved plan and evidence in the run card or inline tool activity. A s
 
 ### OpenClaw is unavailable
 
-OpenClaw is not bundled or connected. The permission-preserving broker and backend routing seam are retained, but no CLI/plugin adapter is wired. Runtime provisioning, adapter implementation and verified integration must happen in a permitted environment and follow device and organisation policies. Do not hand-enable the backend or bypass those policies. Use Horizon's native engine, the supported default.
+OpenClaw is not installed, launched, or used as a runtime dependency. Horizon
+owns its LangGraph harness and uses Ollama for local inference; only selected
+source patterns informed its design.
 
 ### Read aloud is unavailable or silent
 
-Use the reply's **Read aloud** button or **Settings → Behaviour → Read aloud**. Only voices explicitly marked local by the browser are eligible. Install a Windows speech voice and use a browser that exposes it; a cloud-only voice is deliberately not a fallback. Automatic reading is opt-in. Hiding the tab, starting a new prompt/dictation, or closing the page stops playback.
+Use the reply's **Read aloud** button or **Settings → Behaviour → Read aloud**. Only voices explicitly marked local by the browser are eligible. Install a Windows speech voice and use a browser that exposes it; a cloud-only voice is deliberately not a fallback. Automatic reading is opt-in. Hiding the tab, starting a new prompt, or closing the page stops playback.
 
-Read aloud uses Windows/browser speech synthesis, not Foundry Local. Foundry Local 0.12.1 has transcription but no verified local TTS interface in this build. Cloud Microsoft Foundry Speech is not configured or called. Playback/storage failures are shown in the page; browser data erasure resets the voice preference and automatic-reading switch.
+Read aloud uses independent Windows/browser speech synthesis. It does not record
+microphone audio. Playback/storage failures are shown in the page; browser data
+erasure resets the voice preference and automatic-reading switch.
 
 ## Agents cannot load or save
 
@@ -182,16 +190,16 @@ Agent tool runs still use local model inference, but browser, command or MCP too
 
 ## A reply times out
 
-Large models can be slow on first use, as weights load into memory. If replies consistently exceed the limit, raise it in `config.json`:
+Large models can be slow on first use, as weights load into memory. If replies consistently exceed the limit, raise the shared inference timeout in `config.local.json`:
 
 ```json
-"foundry": { "requestTimeoutMs": 240000 }
+"inference": { "requestTimeoutMs": 240000 }
 ```
 
 Or try a smaller model:
 
 ```powershell
-.\scripts\Start-Horizon.ps1 -ModelAlias qwen2.5-0.5b
+.\scripts\Start-Horizon.ps1 -ModelAlias qwen2.5:0.5b
 ```
 
 ## "Your message is too large"
@@ -215,17 +223,16 @@ This benchmarks every downloaded model on your actual hardware and switches to t
 Things worth knowing:
 
 - **Model size dominates.** A 1.5B model is several times faster than a 14B one.
-- **Avoid reasoning models for chat.** Models such as `qwen3` and `phi-4-reasoning` think out loud before answering. Measured here: 1067 tokens spent answering "say hello in five words". Their working is folded into a collapsible section, but you still wait for it.
+- **Reasoning-style models may spend extra time generating working** before an answer. Actual behavior depends on the selected Ollama model and has not been measured for this source-only update.
 - **Under ~10 tokens/second, replies appear slower than reading pace.** That is your hardware, not a bug. Streaming means you can start reading almost immediately regardless.
-- **On ARM machines**, Foundry 0.10.3 publishes no NPU variants, so the NPU cannot help. `Optimize-Horizon.ps1` reports this.
+- Actual performance depends on Ollama's available model/backend and the machine; this source-only update has no runtime benchmark evidence.
 
 ## The first message is slow, later ones are fine
 
 Normal. The first completion after a model loads pays a one-off cost. The app sends a warm-up request at startup to absorb it; if you message before that finishes, you will still feel it. To turn it off:
 
-```json
-"foundry": { "warmUpOnStart": false }
-```
+Set `inference.warmUpOnStart` to `false` in `config.local.json` to disable the
+startup warm-up.
 
 ## Long conversations get slower
 
@@ -237,9 +244,12 @@ If the note says *cut off at the length limit*, the model reached its output cap
 
 If you pressed stop or `Esc`, that is expected — whatever had been written is kept.
 
-## Opening the Foundry address shows a 404
+## Ollama responds but Horizon cannot reach it
 
-Expected. Foundry's address is an API, not a web page. The chat page is the address printed by `Start-Horizon.ps1`. To confirm Foundry itself is alive, visit `<foundry-address>/v1/models`.
+Horizon uses the Ollama native API at `http://127.0.0.1:11434` by default, not
+the OpenAI-compatible `/v1` route. Check `ollama.baseUrl` and
+`HORIZON_OLLAMA_URL`; use a loopback URL and restart Horizon after changing
+configuration. The chat page is the address printed by `Start-Horizon.ps1`.
 
 ## The chat page looks unstyled
 
@@ -253,60 +263,33 @@ You should see `index.html`, `app.css`, and `app.js`. Then refresh with `Ctrl+F5
 
 ## Stop-Horizon says nothing was running
 
-The state file `.runtime/horizon.json` is missing, so the script does not know which process to stop. If a server window is still open, press `Ctrl+C` in it. Then release the model:
+The state file `.runtime/horizon.json` is missing, so the script does not know
+which Horizon process or model it owns. If a server window is still open, press
+`Ctrl+C` in it. Inspect loaded models with `ollama ps`; only unload a model
+manually if you have confirmed it belongs to Horizon and no other Ollama client
+needs it:
 
 ```powershell
-foundry model unload phi-4
-foundry server stop
+ollama ps
+ollama stop <model>
 ```
 
-## Checking that it truly works offline
+This unloads the named model but does not stop Ollama, which Horizon leaves
+running.
 
-1. Start the app and send a message successfully.
-2. Disconnect the network, or apply approved isolation.
-3. Run `Stop-Horizon.ps1`, then `Start-Horizon.ps1` again.
-4. Send another message. It should still answer.
-5. Confirm every address printed uses `127.0.0.1`.
+## Checking offline behavior
 
-## The microphone button is missing
-
-Dictation is off until you ask for it. Switch it on under **Settings → Behaviour**.
-
-If it is switched on and the button still does not appear, `node-pty` is missing — it is installed with everything else, so this is unusual. Run `npm install` in the Horizon folder and restart. Chat is unaffected either way, and Horizon says on the page why dictation is unavailable rather than offering a button that cannot work.
-
-## Dictation hears nothing, or hears the wrong microphone
-
-Foundry records through **whatever Windows has set as the default input device**, and Horizon cannot choose for you. The page never opens the microphone itself, so it has no microphone picker: offering a list it could not honour would be a lie.
-
-Set the device you want in **Settings → System → Sound → Input**, then start the recording again. Two things worth checking while you are there: some headsets have an inline mute switch that Windows reports as a working device, and a far-field laptop array will hear you far more faintly than a headset boom.
-
-Your browser's microphone permission has nothing to do with this. Dictation works whether or not the page has been granted access, and works in a private window, because the recording is not happening in the browser.
-
-## "Foundry is still holding a recording session from earlier"
-
-Foundry keeps an audio stream open while recording, and that stream belongs to the Foundry service rather than to Horizon. If a recording ends abruptly — the machine was shut down, the process was killed — the stream can be left held, and the next recording is refused.
-
-Horizon restarts the Foundry service once to clear it, and says so while it happens. The chat model is dropped with it and has to load again, which is why it is only done after a recording has actually failed.
-
-If it happens repeatedly, clear it by hand:
-
-```powershell
-foundry server restart
-```
-
-Unloading the speech model does **not** release the stream, even though the command reports success.
-
-## Dictation writes into the message box, not the conversation
-
-That is deliberate. Speech is an input method, so it goes where the cursor is: you can read it, correct it, and decide whether to send it. Nothing is sent until you send it.
+Offline behavior is not validated for this source-only update. In an isolated
+approved environment, prepare dependencies and the model while connected,
+disconnect or apply approved isolation, then start Horizon and verify a local
+prompt. Confirm the configured Ollama URL and Horizon web address are loopback.
 
 ## Useful commands
 
 ```powershell
-foundry --version              # is Foundry installed
-foundry server status          # is the service running, and where
-foundry server restart         # clear a recording session left open
-foundry model list             # what models exist
-foundry model list --cached    # what is downloaded to this machine
-foundry model list --loaded    # what is currently in memory
+node --version                 # Node.js must be 20 or later
+ollama --version               # Ollama CLI is installed
+ollama list                    # models available locally
+ollama ps                      # models currently loaded
+ollama pull qwen3:1.7b         # prepare the default model
 ```

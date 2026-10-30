@@ -8,8 +8,10 @@ const path = require("node:path");
 const { AgentService, DEFAULT_SETTINGS, settingsValue } = require("../src/agents");
 const { randomUUID } = require("node:crypto");
 
-const terminal = new Set(["completed", "failed", "cancelled", "interrupted", "skipped"]);
+const terminal = new Set(["completed", "awaiting_user", "failed", "cancelled", "interrupted", "skipped"]);
 const definition = name => ({ type: "function", function: { name, description: name, parameters: { type: "object" } } });
+const nativeCall = (name, args) => ({ choices: [{ message: { role: "assistant", content: null,
+  tool_calls: [{ id: randomUUID(), type: "function", function: { name, arguments: JSON.stringify(args) } }] } }] });
 
 async function until(check) {
   for (let i = 0; i < 400; i++) {
@@ -75,6 +77,22 @@ test("fixed workflows run without model inference and persist their result", asy
   const disk = JSON.parse(fs.readFileSync(path.join(directory, "agent-data.json")));
   assert.equal(disk.runs[0].id, run.id);
   assert.equal(disk.runs[0].result, "tool output");
+  assert.equal(disk.runs[0].verification.status, "not_configured");
+  assert.match(disk.runs[0].verification.message, /no independent outcome checks/);
+});
+
+test("fixed workflow results retain completed steps for a useful final state", async t => {
+  const { service, calls, save } = fixture(t);
+  const agent = save({
+    tools: ["file_read"], steps: [
+      { tool: "file_read", args: { path: "first.txt" } },
+      { tool: "file_read", args: { path: "second.txt" } }
+    ]
+  });
+  const run = service.run(agent.id);
+  await until(() => service.getRun(run.id).status === "completed");
+  assert.equal(calls.length, 2);
+  assert.equal((service.getRun(run.id).result.match(/tool output/g) || []).length, 2);
 });
 
 test("writes pause for exact one-use approval; denied calls never execute", async t => {
@@ -92,7 +110,7 @@ test("writes pause for exact one-use approval; denied calls never execute", asyn
   assert.throws(() => service.approve(run.id, approval.id, true), /no longer pending/);
 });
 
-test("approved and explicitly pre-approved tools execute", async t => {
+test("commands require exact approval even with persisted unattended grants", async t => {
   const { service, calls, save } = fixture(t);
   const agent = save({ tools: ["command_run"], steps: [{ tool: "command_run", args: { id: "fixed" } }] });
   const run = service.run(agent.id);
@@ -101,7 +119,10 @@ test("approved and explicitly pre-approved tools execute", async t => {
   await until(() => service.data.runs[0].status === "completed");
   assert.equal(calls.length, 1);
   const unattended = save({ name: "Automatic", tools: ["command_run"], unattendedTools: ["command_run"], steps: agent.steps });
-  service.run(unattended.id);
+  const second = service.run(unattended.id);
+  const secondApproval = await until(() => service.getRun(second.id).approval);
+  assert.equal(calls.length, 1);
+  service.approve(second.id, secondApproval.id, true);
   await until(() => service.data.runs[1].status === "completed");
   assert.equal(calls.length, 2);
 });
@@ -300,7 +321,9 @@ test("privacy reporting does not call network-capable tools air-gapped after the
     tools: ["command_run"], unattendedTools: ["command_run"],
     steps: [{ tool: "command_run", args: { id: "fixed" } }]
   });
-  service.run(agent.id);
+  const queued = service.run(agent.id);
+  const approval = await until(() => service.getRun(queued.id).approval);
+  service.approve(queued.id, approval.id, true);
   await until(() => service.data.runs[0].status === "completed");
   service.stop();
   assert.deepEqual(service.privacy(), { externalToolsEnabled: false, externalToolsUsed: true });
@@ -308,13 +331,52 @@ test("privacy reporting does not call network-capable tools air-gapped after the
   assert.deepEqual(service.privacy(), { externalToolsEnabled: false, externalToolsUsed: false });
 });
 
+test("ordinary replies use one native decision without JSON routing or planning", async t => {
+  for (const planning of [false, true]) {
+    for (const protocol of ["structured", "native"]) {
+      const requests = [];
+      const { service, settings, calls } = fixture(t, {
+        complete: async body => {
+          requests.push(body);
+          return { choices: [{ message: { role: "assistant", content: "Good evening!" } }] };
+        }
+      });
+      settings.planning = planning;
+      settings.chat.protocol = protocol;
+      service.saveSettings(settings);
+      const run = service.chat([{ role: "user", content: "Good evening :)" }]);
+      await until(() => service.getRun(run.id).status === "completed");
+      const finished = service.getRun(run.id);
+      assert.equal(finished.result, "Good evening!");
+      assert.equal(finished.routing, undefined);
+      assert.equal(finished.plan, undefined);
+      assert.equal(finished.approval, undefined);
+      assert.equal(calls.length, 0);
+      assert.equal(requests.length, 1);
+      assert.ok(requests[0].tools.length);
+      assert.equal(requests[0].response_format, undefined);
+      assert.equal(service.data.settings.chat.protocol, "native");
+    }
+  }
+});
+
+test("failed native inference never executes a tool", async t => {
+  const { service, calls } = fixture(t, {
+    complete: async () => { throw new Error("Inference unavailable"); }
+  });
+  const run = service.chat([{ role: "user", content: "Hello" }]);
+  await until(() => service.getRun(run.id).status === "failed");
+  assert.equal(service.getRun(run.id).failure.stage, "inference");
+  assert.equal(calls.length, 0);
+});
+
 test("ordinary conversations can use tools without creating a reusable agent and retain conversation context", async t => {
   const requests = [];
   const { service, settings, calls } = fixture(t, {
     complete: async body => {
       requests.push(structuredClone(body));
-      return { choices: [{ message: { content: requests.length === 1
-        ? '{"tool":"file_read","args":{"path":"notes.txt"}}' : '{"final":"Here is the note."}' } }] };
+      return requests.length === 1 ? nativeCall("file_read", { path: "notes.txt" })
+        : { choices: [{ message: { content: "Here is the note." } }] };
     }
   });
   settings.roots = [path.resolve("notes")];
@@ -342,9 +404,132 @@ test("ordinary conversations can use tools without creating a reusable agent and
   assert.throws(() => service.chat([{ role: "user", content: "again" }], id), /already submitted/);
 });
 
+test("viewport handoff is a persisted run state that returns control instead of awaiting the human", async t => {
+  const calls = [];
+  const { service, settings } = fixture(t, {
+    tools: {
+      definitions: () => [definition("browser_open")],
+      execute: async (name, args) => {
+        calls.push({ name, args });
+        return JSON.stringify({
+          url: "about:blank", title: "", visible: true, isolated: true,
+          retainedAcrossTurns: true, readyForUser: true
+        });
+      }
+    },
+    complete: async () => nativeCall("browser_open", {})
+  });
+  settings.flags.browser = true;
+  settings.chat.tools = ["browser_open"];
+  service.saveSettings(settings);
+  const conversationId = "viewport-handoff-chat";
+  const run = service.chat([{ role: "user", content: "Open the viewport so I can show you something." }],
+    randomUUID(), conversationId);
+
+  await until(() => service.getRun(run.id).status === "awaiting_user");
+  const handoff = service.getRun(run.id);
+  assert.equal(handoff.conversationId, conversationId);
+  assert.match(handoff.result, /viewport is open and ready/);
+  assert.equal(handoff.handoff.resume, "next-message-in-same-conversation");
+  assert.equal(handoff.handoff.checkpoint.intent, "Open the viewport so I can show you something.");
+  assert.ok(handoff.events.some(event => event.type === "handoff"));
+  assert.deepEqual(calls, [{ name: "browser_open", args: {} }]);
+  assert.equal(service.active.size, 0, "no model or tool task remains waiting for the user");
+});
+
+test("a same-conversation follow-up resumes a visible human handoff without retaining a background wait", async t => {
+  const requests = [];
+  const { service } = fixture(t, {
+    complete: async body => {
+      requests.push(body);
+      return { choices: [{ message: { role: "assistant", content: '{"final":"done"}' } }] };
+    }
+  });
+  const conversationId = "human-handoff-chat";
+  const handoffRun = {
+    id: randomUUID(), agentId: "chat:previous", agentName: "Conversation", source: "chat",
+    status: "awaiting_user", createdAt: Date.now(), startedAt: Date.now(), finishedAt: Date.now(),
+    result: "The browser is ready.", events: [],
+    conversationId,
+    intent: "Read the invoice total after I open the invoice.",
+    handoff: {
+      message: "The browser is ready.", conversationId, resume: "next-message-in-same-conversation",
+      checkpoint: {
+        version: 1, intent: "Read the invoice total after I open the invoice.",
+        latestRequest: "Open the invoice.", progress: [{ tool: "file_read", result: "Invoice source was located." }],
+        truncated: false
+      }
+    }
+  };
+  service.data.runs.push(handoffRun);
+
+  const next = service.chat([{ role: "user", content: "Check the page now." }], randomUUID(), conversationId);
+  assert.equal(next.conversationId, conversationId);
+  assert.equal(next.continuationOf, handoffRun.id);
+  assert.equal(next.continuity.intent, handoffRun.handoff.checkpoint.intent);
+  assert.equal(handoffRun.status, "awaiting_user", "a queued follow-up does not falsely complete the handoff");
+  await until(() => service.getRun(next.id).status === "completed");
+  assert.equal(typeof handoffRun.handoff.resumedAt, "number");
+  assert.equal(handoffRun.handoff.resumedByRunId, next.id);
+  assert.equal(handoffRun.status, "completed");
+  assert.equal(service.getRun(handoffRun.id).handoff.resumedAt, handoffRun.handoff.resumedAt);
+  const checkpointMessage = requests[0].messages.find(message =>
+    message.role === "user" && message.content.startsWith("Horizon continuation checkpoint")
+  );
+  assert.ok(checkpointMessage);
+  assert.match(checkpointMessage.content, /Read the invoice total after I open the invoice/);
+  assert.match(checkpointMessage.content, /Invoice source was located/);
+  assert.match(checkpointMessage.content, /latest user message follows and controls/);
+  assert.equal(requests[0].messages.at(-1).content, "Check the page now.");
+});
+
+test("cancelling a queued handoff continuation leaves the original handoff resumable", async t => {
+  const { service } = fixture(t);
+  const conversationId = "cancel-resume-chat";
+  const handoffRun = {
+    id: randomUUID(), agentId: "chat:previous", agentName: "Conversation", source: "chat",
+    status: "awaiting_user", createdAt: Date.now(), startedAt: Date.now(), finishedAt: Date.now(),
+    result: "Continue when ready.", events: [], conversationId,
+    handoff: {
+      message: "Continue when ready.", conversationId, resume: "next-message-in-same-conversation",
+      checkpoint: { version: 1, intent: "Finish the original task.", latestRequest: "Wait.", progress: [], truncated: false }
+    }
+  };
+  service.data.runs.push(handoffRun);
+  const cancelled = service.chat([{ role: "user", content: "Check now." }], randomUUID(), conversationId);
+  assert.equal(handoffRun.status, "awaiting_user");
+  service.cancel(cancelled.id);
+  assert.equal(handoffRun.status, "awaiting_user");
+  assert.equal(handoffRun.handoff.resumeRequestedByRunId, undefined);
+  const resumed = service.chat([{ role: "user", content: "Try again." }], randomUUID(), conversationId);
+  await until(() => service.getRun(resumed.id).status === "completed");
+  assert.equal(handoffRun.handoff.resumedByRunId, resumed.id);
+});
+
+test("a server restart interrupts a user handoff instead of claiming its ephemeral browser survived", t => {
+  const { service, directory } = fixture(t);
+  const conversationId = "restart-handoff-chat";
+  service.data.runs.push({
+    id: randomUUID(), agentId: "chat:previous", agentName: "Conversation", source: "chat",
+    status: "awaiting_user", createdAt: Date.now(), startedAt: Date.now(), finishedAt: Date.now(),
+    result: "The browser is ready.", events: [], conversationId,
+    handoff: { message: "The browser is ready.", conversationId, resume: "next-message-in-same-conversation" }
+  });
+  service.persist();
+  const restarted = new AgentService({
+    directory, tools: { close: async () => {} }, complete: async () => { throw new Error("No run should resume."); }
+  });
+  const handoff = restarted.getRun(service.data.runs.at(-1).id);
+  assert.equal(handoff.status, "interrupted");
+  assert.equal(typeof handoff.handoff.interruptedAt, "number");
+  assert.match(handoff.error, /will not resume automatically/);
+  assert.equal(restarted.active.size, 0);
+  t.after(() => restarted.close());
+});
+
 test("conversation permission scopes and master switch are enforced independently from reusable agents", async t => {
   const { service, settings, calls } = fixture(t, {
-    complete: async () => ({ choices: [{ message: { content: '{"tool":"command_run","args":{"id":"fixed"}}' } }] })
+    complete: async () => nativeCall("command_run", { commandId: "fixed" })
   });
   settings.chat.tools = ["file_read"];
   service.saveSettings(settings);
@@ -360,7 +545,7 @@ test("conversation permission scopes and master switch are enforced independentl
 
 test("conversation writes require approval even if a reusable agent preapproved the same tool", async t => {
   const { service, save, settings, calls } = fixture(t, {
-    complete: async () => ({ choices: [{ message: { content: '{"tool":"file_write","args":{"path":"note","content":"new"}}' } }] })
+    complete: async () => nativeCall("file_write", { path: "note", content: "new" })
   });
   save({ tools: ["file_write"], unattendedTools: ["file_write"] });
   settings.chat.tools = ["file_write"];
@@ -375,7 +560,7 @@ test("conversation writes require approval even if a reusable agent preapproved 
 
 test("a conversation cancelled before submission cannot later execute, and cancellation stops pending approvals", async t => {
   const { service, settings, calls } = fixture(t, {
-    complete: async () => ({ choices: [{ message: { content: '{"tool":"file_write","args":{"path":"note","content":"new"}}' } }] })
+    complete: async () => nativeCall("file_write", { path: "note", content: "new" })
   });
   settings.chat.tools = ["file_write"];
   service.saveSettings(settings);
@@ -408,82 +593,147 @@ test("legacy settings receive independent conversation defaults without enabling
   assert.throws(() => settingsValue({ ...legacy, chat: { ...DEFAULT_SETTINGS.chat, timeoutMs: 999 } }), /timeout/);
 });
 
-test("OpenClaw orchestration uses Horizon permissions and approvals without invoking the native model loop", async t => {
-  const { service, settings, calls } = fixture(t, {
-    complete: async () => { throw new Error("Native loop must not run."); },
-    orchestrate: async ({ invoke, onModel }) => {
-      onModel();
-      await invoke("file_read", { path: "note" });
-      await invoke("file_write", { path: "note", content: "exact preview" });
-      return "OpenClaw completed the request.";
-    }
-  });
-  settings.backend = "openclaw";
-  service.saveSettings(settings);
-  const run = service.chat([{ role: "user", content: "Read then write" }]);
-  const approval = await until(() => service.getRun(run.id).approval);
-  assert.equal(approval.tool, "file_write");
-  assert.equal(calls.length, 1);
-  service.approve(run.id, approval.id, true);
-  await until(() => terminal.has(service.getRun(run.id).status));
-  assert.equal(service.getRun(run.id).status, "completed");
-  assert.equal(service.getRun(run.id).result, "OpenClaw completed the request.");
-  assert.equal(calls.length, 2);
-});
-
-test("OpenClaw cannot exceed the Horizon tool budget or obtain ungranted tools", async t => {
-  const { service, settings, calls } = fixture(t, {
-    orchestrate: async ({ invoke }) => {
-      await invoke("file_read", { path: "note" });
-      await invoke("file_read", { path: "note" });
-      return "Must not complete.";
-    }
-  });
-  settings.backend = "openclaw";
-  settings.chat.maxSteps = 1;
-  service.saveSettings(settings);
-  const run = service.chat([{ role: "user", content: "Read twice" }]);
-  await until(() => service.getRun(run.id).status === "failed");
-  assert.match(service.getRun(run.id).error, /maximum tool steps/);
-  assert.equal(calls.length, 1);
-});
-
-test("missing OpenClaw runtime fails explicitly rather than falling back to native inference", async t => {
-  const { service, settings } = fixture(t);
-  settings.backend = "openclaw";
-  service.saveSettings(settings);
-  const run = service.chat([{ role: "user", content: "Act" }]);
-  await until(() => service.getRun(run.id).status === "failed");
-  assert.match(service.getRun(run.id).error, /not provisioned/);
-  assert.throws(() => settingsValue({ ...settings, backend: "invented" }), /backend/);
-});
-
-test("OpenClaw cannot acquire a tool omitted from the run's explicit grant", async t => {
-  const { service, settings, calls } = fixture(t, {
-    orchestrate: async ({ invoke }) => {
-      await invoke("command_run", { commandId: "fixed" });
-      return "Must not complete.";
-    }
-  });
-  settings.backend = "openclaw";
+test("native conversation migration preserves persisted runs, grants and saved-agent protocols", async t => {
+  const { service, settings, save, directory } = fixture(t);
+  settings.roots = [directory];
   settings.chat.tools = ["file_read"];
   service.saveSettings(settings);
-  const run = service.chat([{ role: "user", content: "Run an ungranted command" }]);
-  await until(() => service.getRun(run.id).status === "failed");
-  assert.match(service.getRun(run.id).error, /not permitted/);
-  assert.equal(calls.length, 0);
+  const agent = save({ protocol: "structured", tools: ["file_read", "file_write"], unattendedTools: ["file_write"],
+    steps: [{ tool: "file_read", args: { path: "note.txt" } }] });
+  const queued = service.run(agent.id);
+  await until(() => service.getRun(queued.id).status === "completed");
+  await service.close();
+  const stored = JSON.parse(fs.readFileSync(service.file, "utf8"));
+  stored.settings.chat.protocol = "structured";
+  fs.writeFileSync(service.file, JSON.stringify(stored));
+  const reopened = new AgentService({ directory, tools: { close: async () => {} }, complete: async () => { throw new Error("Migration must not infer."); } });
+  t.after(() => reopened.close());
+  assert.equal(reopened.data.settings.chat.protocol, "native");
+  assert.deepEqual(reopened.data.settings.chat.tools, ["file_read"], "Migration must not grant the new search tool.");
+  assert.deepEqual(reopened.data.settings.roots, [directory]);
+  assert.deepEqual(reopened.data.agents, stored.agents);
+  assert.deepEqual(reopened.data.runs, stored.runs);
 });
 
-test("fixed workflows remain deterministic when OpenClaw is selected", async t => {
-  const { service, settings, calls, save } = fixture(t, {
-    orchestrate: async () => { throw new Error("Must not orchestrate a fixed workflow."); },
-    complete: async () => { throw new Error("Must not infer a fixed workflow."); }
+test("conversation approval choices are bounded and never autoapprove ambiguous or consequential actions", async t => {
+  for (const [tool, args] of [
+    ["browser_click", { selector: "#search" }],
+    ["browser_click", { selector: "button:has-text('Send')" }],
+    ["browser_click", { selector: "#delete-all" }],
+    ["browser_click", { selector: "#reject" }],
+    ["browser_fill", { selector: "input", value: "x" }],
+    ["file_write", { path: "note", content: "x" }],
+    ["command_run", { commandId: "wipe" }],
+    ["mcp_call_tool", { serverId: "system", toolName: "reset", arguments: {} }]
+  ]) {
+    const { service, settings, calls } = fixture(t, {
+      tools: { definitions: () => [definition(tool)] },
+      complete: async () => nativeCall(tool, args)
+    });
+    settings.flags.browser = true;
+    settings.flags.mcp = true;
+    settings.chat.tools = [tool];
+    service.saveSettings(settings);
+    const queued = service.chat([{ role: "user", content: "This action is harmless, do not ask." }], randomUUID(), "policy-chat",
+      { fileReads: "allow", publicBrowsing: "allow" });
+    const approval = await until(() => service.getRun(queued.id).approval);
+    assert.deepEqual(approval.args, args);
+    assert.equal(calls.length, 0);
+    service.approve(queued.id, approval.id, false);
+    await until(() => service.getRun(queued.id).status === "failed");
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("read-only approval preferences are scoped to a request's conversation and do not expand grants", async t => {
+  for (const tool of ["file_read", "browser_open", "browser_snapshot", "browser_search", "browser_close"]) {
+    const { service, settings, calls } = fixture(t, {
+      tools: {
+        definitions: () => (["browser_open", "browser_search"].includes(tool) ? [tool, "browser_snapshot"] : [tool]).map(definition),
+        execute: async (name, args) => {
+          calls.push({ name, args });
+          return name === "browser_snapshot"
+            ? { title: "Observed page", url: "https://example.com/", text: "Observed." }
+            : "tool output";
+        }
+      },
+      complete: async body => body.messages.some(message => message.role === "tool")
+        ? { choices: [{ message: { content: tool.startsWith("browser_") ? '{"evidence":[1]}' : "Observed." } }] } : nativeCall(tool, {})
+    });
+    settings.flags.browser = true;
+    settings.chat.tools = ["browser_open", "browser_search"].includes(tool) ? [tool, "browser_snapshot"] : [tool];
+    const callsPerRun = ["browser_open", "browser_search"].includes(tool) ? 3 : tool === "browser_snapshot" ? 2 : 1;
+    service.saveSettings(settings);
+    const first = service.chat([{ role: "user", content: "Read" }], randomUUID(), "automatic-chat");
+    await until(() => service.getRun(first.id).status === "completed");
+    assert.equal(calls.length, callsPerRun);
+    const second = service.chat([{ role: "user", content: "Read" }], randomUUID(), "ask-chat",
+      { fileReads: "ask", publicBrowsing: "ask" });
+    const approval = await until(() => service.getRun(second.id).approval);
+    assert.equal(calls.length, callsPerRun);
+    service.approve(second.id, approval.id, false);
+    await until(() => service.getRun(second.id).status === "failed");
+    const third = service.chat([{ role: "user", content: "Read" }], randomUUID(), "automatic-chat");
+    await until(() => service.getRun(third.id).status === "completed");
+    assert.equal(calls.length, callsPerRun * 2);
+    assert.throws(() => service.chat([{ role: "user", content: "Read" }], randomUUID(), "bad", { publicBrowsing: "all" }), /allow or ask/);
+    assert.throws(() => service.chat([{ role: "user", content: "Read" }], randomUUID(), "bad", { browser_click: "allow" }), /Unknown/);
+  }
+});
+
+test("saved and scheduled unattended grants cannot bypass human approval for side effects", async t => {
+  for (const [tool, args] of [
+    ["browser_click", { selector: "#submit" }],
+    ["browser_click", { selector: "#delete-all" }],
+    ["browser_fill", { selector: "input", value: "private" }],
+    ["file_write", { path: "note.txt", content: "replacement" }],
+    ["command_run", { commandId: "wipe" }],
+    ["mcp_call_tool", { serverId: "system", toolName: "reset", arguments: {} }]
+  ]) {
+    const { service, settings, save, calls } = fixture(t, {
+      tools: { definitions: () => [definition(tool)] }
+    });
+    settings.flags.browser = settings.flags.mcp = true;
+    service.saveSettings(settings);
+    const agent = save({ tools: [tool], unattendedTools: [tool],
+      steps: [{ tool, args }] });
+    const queued = service.run(agent.id, undefined, "schedule");
+    const approval = await until(() => service.getRun(queued.id).approval);
+    assert.equal(approval.tool, tool);
+    assert.deepEqual(approval.args, args);
+    assert.equal(calls.length, 0);
+    service.approve(queued.id, approval.id, false);
+    await until(() => service.getRun(queued.id).status === "failed");
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("saved-agent unattended public reads and MCP listings keep their explicit grants", async t => {
+  for (const tool of ["browser_open", "browser_search", "browser_snapshot", "browser_close", "mcp_list_tools"]) {
+    const { service, settings, save, calls } = fixture(t, {
+      tools: { definitions: () => [definition(tool)] }
+    });
+    settings.flags.browser = settings.flags.mcp = true;
+    service.saveSettings(settings);
+    const agent = save({ tools: [tool], unattendedTools: [tool], steps: [{ tool, args: {} }] });
+    const queued = service.run(agent.id);
+    await until(() => service.getRun(queued.id).status === "completed");
+    assert.equal(calls.length, 1);
+    assert.equal(service.getRun(queued.id).events.some(event => event.type === "approval"), false);
+  }
+});
+
+test("legacy external-backend settings migrate to Horizon's native runtime", async t => {
+  let externalCalled = false;
+  const { service, settings } = fixture(t, {
+    orchestrate: async () => { externalCalled = true; return "unexpected"; }
   });
   settings.backend = "openclaw";
   service.saveSettings(settings);
-  const agent = save({ steps: [{ tool: "file_read", args: { path: "note" } }] });
-  const run = service.run(agent.id);
-  await until(() => terminal.has(service.getRun(run.id).status));
-  assert.equal(service.getRun(run.id).status, "completed");
-  assert.equal(calls.length, 1);
+  assert.equal(service.snapshot().settings.backend, "native");
+  const run = service.chat([{ role: "user", content: "Act" }]);
+  await until(() => service.getRun(run.id).status === "completed");
+  assert.equal(service.getRun(run.id).result, "done");
+  assert.equal(externalCalled, false);
+  assert.throws(() => settingsValue({ ...settings, backend: "invented" }), /backend/);
 });

@@ -35,6 +35,10 @@ test("definitions are feature-flag gated and MCP tools require a configured serv
   assert.deepEqual(tools.definitions(config), []);
   config.mcpServers.push({ id: "local" });
   assert.deepEqual(tools.definitions(config).map(item => item.function.name), ["mcp_list_tools", "mcp_call_tool"]);
+  const browserOpen = tools.definitions(settings("C:\\approved"))
+    .find(item => item.function.name === "browser_open").function;
+  assert.deepEqual(browserOpen.parameters.required, undefined);
+  assert.match(browserOpen.description, /blank viewport/);
 });
 
 test("file operations stay under roots, reject traversal and symlinks, and require a hash to overwrite", async () => {
@@ -121,10 +125,14 @@ test("commands use only fixed configured argv, cap output and honour cancellatio
 test("browser URLs and subrequests reject non-public targets", async () => {
   await withTempDir(async root => {
     const config = settings(root);
-    await assert.rejects(tools.execute("browser_open", { url: "http://example.com" }, config), /public HTTPS/);
-    await assert.rejects(tools.execute("browser_open", { url: "https://127.0.0.1/" }, config), /public HTTPS/);
-    await assert.rejects(tools.execute("browser_open", { url: "https://[::1]/" }, config), /public HTTPS/);
-    await assert.rejects(tools.execute("browser_open", { url: "file:///etc/passwd" }, config), /public HTTPS/);
+    const signal = new AbortController().signal;
+    await assert.rejects(tools.execute("browser_open", {}, config, signal), /only in an interactive conversation/);
+    await assert.rejects(tools.execute("browser_open", { url: "" }, config, signal), /only in an interactive conversation/);
+    await assert.rejects(tools.execute("browser_open", { url: "http://example.com" }, config, signal), /public HTTPS/);
+    await assert.rejects(tools.execute("browser_open", { url: "https://127.0.0.1/" }, config, signal), /public HTTPS/);
+    await assert.rejects(tools.execute("browser_open", { url: "https://[::1]/" }, config, signal), /public HTTPS/);
+    await assert.rejects(tools.execute("browser_open", { url: "file:///etc/passwd" }, config, signal), /public HTTPS/);
+    await tools.closeRun(signal);
   });
 });
 

@@ -12,18 +12,22 @@
     "portSearchLimit": 20,
     "openBrowser": true
   },
+  "provider": "ollama",
   "model": {
-    "alias": "phi-4"
+    "alias": "qwen3:1.7b"
   },
-  "foundry": {
-    "apiPrefix": "/v1",
+  "inference": {
     "requestTimeoutMs": 120000,
     "statusTimeoutMs": 5000,
     "statusCacheMs": 3000,
     "warmUpOnStart": true,
-    "warmUpTimeoutMs": 300000,
-    "unloadOnExit": true,
-    "stopServiceOnExit": false
+    "warmUpTimeoutMs": 300000
+  },
+  "ollama": {
+    "baseUrl": null,
+    "keepAlive": "30m",
+    "binary": null,
+    "autoStart": true
   },
   "chat": {
     "systemPrompt": "You are a helpful, concise local assistant.",
@@ -44,11 +48,5 @@
   "reader": {
     "enabled": false,
     "maxChars": 12000
-  },
-  "dictation": {
-    "enabled": false,
-    "alias": "nemotron-speech-streaming-en-0.6b",
-    "maxRecordingMs": 300000,
-    "idleTimeoutMs": 300000
   }
 }

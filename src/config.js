@@ -66,8 +66,14 @@ function firstDefined(...values) {
 // Resolution order for every setting: CLI argument > environment variable >
 // config.local.json > config.json > built-in fallback.
 function loadConfig(argv = process.argv.slice(2), env = process.env) {
-  const file = merge(readJsonIfPresent(defaultsPath, true), readJsonIfPresent(localPath, false));
+  const local = readJsonIfPresent(localPath, false);
+  const file = merge(readJsonIfPresent(defaultsPath, true), local);
   const cli = parseCliArgs(argv);
+
+  const provider = String(firstDefined(cli.provider, env.HORIZON_PROVIDER, file.provider, "ollama")).trim().toLowerCase();
+  if (provider !== "ollama") {
+    throw new Error(`Invalid model provider: ${provider}. This Horizon build supports Ollama only.`);
+  }
 
   const config = {
     rootDir,
@@ -91,22 +97,29 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
       // deliberate parallel instances (the test suite does).
       allowMultipleInstances: toBool(firstDefined(cli["allow-multiple-instances"], env.HORIZON_ALLOW_MULTIPLE_INSTANCES, file.web?.allowMultipleInstances), false)
     },
+    provider,
     model: {
-      alias: firstDefined(cli["model-alias"], env.HORIZON_MODEL_ALIAS, file.model?.alias, "phi-4"),
-      id: firstDefined(cli["model-id"], env.FOUNDRY_MODEL_ID) || null
+      alias: firstDefined(
+        cli["model-alias"], env.HORIZON_MODEL_ALIAS, local.model?.alias,
+        file.model?.alias, "qwen3:1.7b"
+      ),
+      id: firstDefined(cli["model-id"], env.HORIZON_MODEL_ID) || null
     },
-    foundry: {
-      baseUrl: firstDefined(cli["foundry-base-url"], env.FOUNDRY_BASE_URL) || null,
-      apiPrefix: firstDefined(env.HORIZON_API_PREFIX, file.foundry?.apiPrefix, "/v1"),
-      requestTimeoutMs: toInt(firstDefined(cli["request-timeout-ms"], env.HORIZON_REQUEST_TIMEOUT_MS, file.foundry?.requestTimeoutMs), 120000),
-      statusTimeoutMs: toInt(firstDefined(env.HORIZON_STATUS_TIMEOUT_MS, file.foundry?.statusTimeoutMs), 5000),
-      statusCacheMs: toInt(firstDefined(env.HORIZON_STATUS_CACHE_MS, file.foundry?.statusCacheMs), 3000),
-      warmUpOnStart: toBool(firstDefined(env.HORIZON_WARM_UP, file.foundry?.warmUpOnStart), true),
-      warmUpTimeoutMs: toInt(firstDefined(env.HORIZON_WARM_UP_TIMEOUT_MS, file.foundry?.warmUpTimeoutMs), 300000),
-      // Models stay resident in the Foundry daemon after Horizon exits, so
-      // by default the one we loaded is released on shutdown.
-      unloadOnExit: toBool(firstDefined(cli["unload-on-exit"], env.HORIZON_UNLOAD_ON_EXIT, file.foundry?.unloadOnExit), true),
-      stopServiceOnExit: toBool(firstDefined(cli["stop-service-on-exit"], env.HORIZON_STOP_SERVICE_ON_EXIT, file.foundry?.stopServiceOnExit), false)
+    inference: {
+      requestTimeoutMs: toInt(firstDefined(cli["request-timeout-ms"], env.HORIZON_REQUEST_TIMEOUT_MS, file.inference?.requestTimeoutMs), 120000),
+      statusTimeoutMs: toInt(firstDefined(env.HORIZON_STATUS_TIMEOUT_MS, file.inference?.statusTimeoutMs), 5000),
+      statusCacheMs: toInt(firstDefined(env.HORIZON_STATUS_CACHE_MS, file.inference?.statusCacheMs), 3000),
+      warmUpOnStart: toBool(firstDefined(env.HORIZON_WARM_UP, file.inference?.warmUpOnStart), true),
+      warmUpTimeoutMs: toInt(firstDefined(env.HORIZON_WARM_UP_TIMEOUT_MS, file.inference?.warmUpTimeoutMs), 300000)
+    },
+    ollama: {
+      // Null means the default loopback address. Only loopback is accepted.
+      baseUrl: firstDefined(cli["ollama-url"], env.HORIZON_OLLAMA_URL, file.ollama?.baseUrl) || null,
+      // How long Ollama keeps a model resident after Horizon loads it.
+      keepAlive: String(firstDefined(env.HORIZON_OLLAMA_KEEP_ALIVE, file.ollama?.keepAlive, "30m")),
+      binary: firstDefined(env.HORIZON_OLLAMA_BINARY, file.ollama?.binary) || null,
+      // Start Ollama when Horizon launches and it is not already running.
+      autoStart: toBool(firstDefined(env.HORIZON_OLLAMA_AUTOSTART, file.ollama?.autoStart), true)
     },
     chat: {
       systemPrompt: firstDefined(env.HORIZON_SYSTEM_PROMPT, file.chat?.systemPrompt, "You are a helpful, concise local assistant."),
@@ -135,40 +148,11 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
       // text to the model instead of letting it guess from the address.
       enabled: toBool(firstDefined(env.HORIZON_READ_LINKS, file.reader?.enabled), false),
       maxChars: toInt(firstDefined(env.HORIZON_READ_MAX_CHARS, file.reader?.maxChars), 12000)
-    },
-    dictation: {
-      // Speaking instead of typing. Off unless asked for, because it opens the
-      // microphone and holds a second model in memory.
-      enabled: toBool(firstDefined(env.HORIZON_DICTATION, file.dictation?.enabled), false),
-      alias: firstDefined(env.HORIZON_DICTATION_MODEL, file.dictation?.alias, "nemotron-speech-streaming-en-0.6b"),
-      // A recording that is never stopped would hold the microphone open for as
-      // long as the page is left alone, so there is an upper bound on one take.
-      maxRecordingMs: toInt(firstDefined(env.HORIZON_DICTATION_MAX_MS, file.dictation?.maxRecordingMs), 300000),
-      // How long an unused session stays loaded before it releases the model.
-      idleTimeoutMs: toInt(firstDefined(env.HORIZON_DICTATION_IDLE_MS, file.dictation?.idleTimeoutMs), 300000)
     }
   };
 
   if (config.web.port < 0 || config.web.port > 65535) {
     throw new Error(`Invalid web port: ${config.web.port}. Use 0 for an automatically assigned port.`);
-  }
-
-  // The alias reaches the Foundry command line, so it is checked here rather
-  // than trusted from a file that a user may have edited by hand.
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(config.dictation.alias)) {
-    throw new Error(`Invalid dictation model alias: ${config.dictation.alias}`);
-  }
-
-  // One minute is long enough to be useful; thirty is long enough that the user
-  // has clearly chosen it. Outside that range the value is almost certainly a
-  // mistake, and a wrong value here means a microphone left open.
-  const idleMs = config.dictation.idleTimeoutMs;
-  if (idleMs < 60000 || idleMs > 1800000) {
-    throw new Error(`Invalid dictation idle timeout: ${idleMs} ms. Use 60000 to 1800000 (1 to 30 minutes).`);
-  }
-
-  if (config.dictation.maxRecordingMs < 5000 || config.dictation.maxRecordingMs > 1800000) {
-    throw new Error(`Invalid dictation recording limit: ${config.dictation.maxRecordingMs} ms. Use 5000 to 1800000.`);
   }
 
   return config;

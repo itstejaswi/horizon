@@ -1,11 +1,10 @@
 <#
 .SYNOPSIS
-    Starts Horizon. Foundry Local is started too if it is available.
+    Starts Horizon and, when possible, starts the local Ollama service.
 
 .DESCRIPTION
-    Horizon can run without Foundry: the page opens, and the Connection panel
-    lets you install or start the service from there. This script does the same
-    work up front when it can, so the first message is quick.
+    Horizon can run without Ollama so the page remains available for setup and
+    troubleshooting. Any Ollama endpoint used by this script must be loopback.
 
 .EXAMPLE
     .\Start-Horizon.ps1
@@ -14,7 +13,7 @@
     .\Start-Horizon.ps1 -WebPort 3000
 
 .EXAMPLE
-    .\Start-Horizon.ps1 -ModelAlias qwen2.5-1.5b -NoBrowser
+    .\Start-Horizon.ps1 -ModelAlias qwen2.5:1.5b -NoBrowser
 #>
 [CmdletBinding()]
 param(
@@ -30,19 +29,19 @@ $ErrorActionPreference = 'Stop'
 
 $config = Get-HorizonConfig
 if (-not $ModelAlias) { $ModelAlias = $config.model.alias }
+$ModelAlias = Assert-OllamaModelAlias -Alias $ModelAlias
 if ($WebPort -lt 0) { $WebPort = [int]$config.web.port }
+$ollamaBase = Get-OllamaBaseUrl -Config $config
 
 Write-Host ""
 Write-Host "Starting $($config.app.displayName)" -ForegroundColor White
 Write-Host ""
 
-# Node is the only hard requirement. Everything else can be sorted out from
-# the page itself, so a missing Foundry is reported rather than fatal.
 Write-HorizonStep 'Step 1 of 4: checking Node.js...'
-Assert-HorizonPrerequisite -Command 'node' -Guidance 'Install Node.js 18 or later, then try again.'
+Assert-HorizonPrerequisite -Command 'node' -Guidance 'Install Node.js 20 or later (a supported LTS is recommended), then try again.'
 $nodeMajor = [int]((node --version).TrimStart('v').Split('.')[0])
-if ($nodeMajor -lt 18) {
-    throw "Node.js 18 or later is required, but $(node --version) was found."
+if ($nodeMajor -lt 20) {
+    throw "Node.js 20 or later is required by the local LangGraph runtime, but $(node --version) was found."
 }
 Write-HorizonOk "Node.js $(node --version)"
 
@@ -59,59 +58,53 @@ if ($LASTEXITCODE -ne 0) {
     }
 }
 
-$apiBase = $null
-$modelId = $null
-
-Write-HorizonStep 'Step 2 of 4: looking for Foundry Local...'
-if (-not (Get-Command foundry -ErrorAction SilentlyContinue)) {
-    Write-Host "  Foundry Local is not installed on this account." -ForegroundColor Yellow
-    Write-Host "  Horizon will still start. Use the Connection panel for setup steps." -ForegroundColor Yellow
-} else {
-    $endpoint = Get-FoundryEndpoint
-    if (-not $endpoint) {
+Write-HorizonStep 'Step 2 of 4: checking Ollama...'
+$ollamaAvailable = Test-OllamaService -BaseUrl $ollamaBase
+$ollamaStartError = $null
+if (-not $ollamaAvailable) {
+    if (Get-Command ollama -CommandType Application -ErrorAction SilentlyContinue) {
         Write-HorizonDetail 'The service is not running. Starting it...'
-        foundry server start 2>&1 | Out-Null
-        $endpoint = Get-FoundryEndpoint
-    }
-
-    if (-not $endpoint) {
-        Write-Host "  The Foundry service could not be started." -ForegroundColor Yellow
-        Write-Host "  Horizon will still start, and you can retry from the Connection panel." -ForegroundColor Yellow
+        try {
+            $ollamaAvailable = Start-HorizonOllamaService -BaseUrl $ollamaBase
+        } catch {
+            $ollamaStartError = $_.Exception.Message
+        }
     } else {
-        $endpoint = Assert-LoopbackEndpoint -Endpoint $endpoint
-        $apiBase = Get-FoundryApiBase -Endpoint $endpoint -ApiPrefix $config.foundry.apiPrefix
-        Write-HorizonOk "Foundry is listening at $endpoint"
-        Write-HorizonDetail 'Foundry chooses this port itself and it can change between runs. That is expected.'
+        Write-Host "  Ollama is not installed or running." -ForegroundColor Yellow
+        Write-Host "  Horizon will still start. Install Ollama from https://ollama.com/download" -ForegroundColor Yellow
     }
+}
+if ($ollamaAvailable) {
+    Write-HorizonOk "Ollama is listening at $ollamaBase"
+} else {
+    if ($ollamaStartError) { Write-Host "  Ollama startup error: $ollamaStartError" -ForegroundColor Yellow }
+    Write-Host '  Ollama could not be started. Horizon will still start; retry from the Connection panel.' -ForegroundColor Yellow
 }
 
 Write-HorizonStep "Step 3 of 4: preparing '$ModelAlias'..."
-if (-not $apiBase) {
-    Write-HorizonDetail 'Skipped: the Foundry service is not available yet.'
+if (-not $ollamaAvailable) {
+    Write-HorizonDetail 'Skipped: Ollama is not available yet.'
 } elseif ($SkipModelLoad) {
     Write-HorizonDetail 'Skipped at your request.'
 } else {
-    foundry model load $ModelAlias 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  '$ModelAlias' could not be loaded. If it was never downloaded, run:" -ForegroundColor Yellow
-        Write-Host "    foundry model download $ModelAlias" -ForegroundColor Yellow
-        Write-Host "  You can also pick a different model from the page." -ForegroundColor Yellow
-    } else {
-        try {
-            $modelId = Resolve-FoundryModel -ApiBase $apiBase -Alias $ModelAlias
-            Write-HorizonOk "Model ready: $modelId"
-        } catch {
-            Write-Host "  $($_.Exception.Message)" -ForegroundColor Yellow
+    try {
+        $installed = @(Get-OllamaModels -BaseUrl $ollamaBase -TimeoutSec 10)
+        $installedName = Resolve-OllamaModel -Models $installed -Alias $ModelAlias
+        if ($installedName) {
+            Write-HorizonOk "Model '$installedName' is installed."
+        } else {
+            Write-Host "  '$ModelAlias' is not installed. Pull it with:" -ForegroundColor Yellow
+            Write-Host "    ollama pull $ModelAlias" -ForegroundColor Yellow
+            Write-Host '  You can also pick or download a model from the page.' -ForegroundColor Yellow
         }
+    } catch {
+        Write-Host "  Could not check the installed models: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
 Write-HorizonStep 'Step 4 of 4: starting the local website...'
 
-# Only pass what was actually resolved; the server discovers the rest itself
-# and can recover if Foundry moves to a different port later.
-if ($apiBase) { $env:FOUNDRY_BASE_URL = $apiBase } else { Remove-Item Env:FOUNDRY_BASE_URL -ErrorAction SilentlyContinue }
-if ($modelId) { $env:FOUNDRY_MODEL_ID = $modelId } else { Remove-Item Env:FOUNDRY_MODEL_ID -ErrorAction SilentlyContinue }
+$env:HORIZON_PROVIDER = 'ollama'
 $env:HORIZON_MODEL_ALIAS = $ModelAlias
 $env:HORIZON_PORT = "$WebPort"
 $env:HORIZON_OPEN_BROWSER = if ($NoBrowser) { 'false' } else { 'true' }
@@ -126,6 +119,6 @@ try {
     Remove-HorizonRuntimeState -Config $config
     Write-Host ""
     Write-HorizonDetail 'Horizon has stopped.'
-    Write-HorizonDetail 'Run .\Stop-Horizon.ps1 to stop the Foundry service and free its memory.'
+    Write-HorizonDetail 'Run .\Stop-Horizon.ps1 to unload the model and free its memory.'
     Write-Host ""
 }

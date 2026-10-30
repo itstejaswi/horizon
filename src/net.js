@@ -7,8 +7,7 @@ function isLoopbackHost(hostname) {
 }
 
 // Binds the server, walking upward from the requested port when it is already
-// taken. Port 0 asks the operating system for any free port, which is the
-// behaviour Foundry Local itself uses.
+// taken. Port 0 asks the operating system for any free port.
 function listenWithFallback(server, { host, port, portSearchLimit }) {
   return new Promise((resolve, reject) => {
     let attempt = 0;

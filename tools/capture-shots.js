@@ -12,8 +12,7 @@
 //
 // Needs Horizon running on :3000, phi-4 and qwen3-0.6b downloaded, and Edge.
 //
-// Two shots are not captured here and are taken by hand: dictation, which needs
-// someone to speak into a microphone, and the shutdown dialog, which is modal.
+// The shutdown dialog is modal and is captured by hand.
 
 const { spawn } = require("child_process");
 const fs = require("fs");

@@ -17,9 +17,38 @@ test("local agent API rejects cross-origin changes and executes a durable offlin
   fs.mkdirSync(notes);
   fs.writeFileSync(path.join(notes, "note.txt"), "A personal offline note.");
   let inferenceCalls = 0;
+  const resident = new Set();
   const stub = http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
-    if (req.url === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "stub-model", parent: "stub" }] }));
+    const url = (req.url || "").split("?")[0];
+    if (req.method === "GET" && url === "/api/version") return res.end(JSON.stringify({ version: "0.6.1" }));
+    if (req.method === "GET" && url === "/api/tags") {
+      return res.end(JSON.stringify({ models: [{ name: "stub-model", size: 1024, details: {} }] }));
+    }
+    if (req.method === "GET" && url === "/api/ps") {
+      return res.end(JSON.stringify({ models: [...resident].map(name => ({ name, size_vram: 0 })) }));
+    }
+    if (req.method === "GET" && url === "/v1/models") {
+      return res.end(JSON.stringify({ data: [{ id: "stub-model" }] }));
+    }
+    if (req.method === "POST" && url === "/api/generate") {
+      let body = "";
+      req.on("data", chunk => { body += chunk; });
+      return req.on("end", () => {
+        const request = JSON.parse(body || "{}");
+        if (request.model !== "stub-model") {
+          res.statusCode = 404;
+          return res.end(JSON.stringify({ error: "model not found" }));
+        }
+        if (request.keep_alive === 0) resident.delete(request.model);
+        else resident.add(request.model);
+        res.end(JSON.stringify({ model: request.model, response: "", done: true }));
+      });
+    }
+    if (req.method !== "POST" || url !== "/v1/chat/completions") {
+      res.statusCode = 404;
+      return res.end(JSON.stringify({ error: `Unexpected stub request: ${req.method} ${url}` }));
+    }
     inferenceCalls++;
     let body = "";
     req.on("data", chunk => { body += chunk; });
@@ -36,19 +65,29 @@ test("local agent API rejects cross-origin changes and executes a durable offlin
         ? JSON.stringify({ tool: "file_read", args: { path: path.join(notes, "note.txt") } })
         : last === "Write a note in this ordinary conversation."
           ? JSON.stringify({ tool: "file_write", args: { path: path.join(notes, "chat.txt"), content: "Approved chat write." } })
-          : '{"final":"complete"}';
-      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }));
+          : last === "Plan and verify a note in this ordinary conversation."
+            ? JSON.stringify({ tool: "file_write", args: { path: path.join(notes, "planned.txt"), content: "Verified planned write." } })
+            : '{"final":"complete"}';
+      const action = JSON.parse(content);
+      const message = request.tools ? action.tool
+        ? { role: "assistant", content: null, tool_calls: [{ id: "fixture-call", type: "function", function: { name: action.tool, arguments: JSON.stringify(action.args) } }] }
+        : { role: "assistant", content: action.final }
+        : { role: "assistant", content };
+      res.end(JSON.stringify({ choices: [{ message }] }));
     });
   });
   await new Promise(resolve => stub.listen(0, "127.0.0.1", resolve));
+  const appEnv = {
+    ...process.env, HORIZON_OPEN_BROWSER: "false", HORIZON_PORT: "0",
+    HORIZON_ALLOW_MULTIPLE_INSTANCES: "true", HORIZON_RUNTIME_DIR: runtime,
+    HORIZON_WARM_UP: "false", HORIZON_PROVIDER: "ollama",
+    HORIZON_MODEL_ID: "stub-model", HORIZON_MODEL_ALIAS: "stub-model",
+    HORIZON_OLLAMA_AUTOSTART: "false",
+    HORIZON_OLLAMA_URL: `http://127.0.0.1:${stub.address().port}`
+  };
   const child = spawn(process.execPath, [path.join(ROOT, "src", "server.js")], {
     cwd: ROOT,
-    env: {
-      ...process.env, HORIZON_OPEN_BROWSER: "false", HORIZON_PORT: "0",
-      HORIZON_ALLOW_MULTIPLE_INSTANCES: "true", HORIZON_RUNTIME_DIR: runtime,
-      HORIZON_WARM_UP: "false", FOUNDRY_MODEL_ID: "stub-model", HORIZON_MODEL_ALIAS: "stub",
-      FOUNDRY_BASE_URL: `http://127.0.0.1:${stub.address().port}/v1`
-    },
+    env: appEnv,
     stdio: ["ignore", "pipe", "pipe"]
   });
   let output = "";
@@ -135,7 +174,7 @@ test("local agent API rejects cross-origin changes and executes a durable offlin
   }
   const second = spawn(process.execPath, [path.join(ROOT, "src", "server.js")], {
     cwd: ROOT,
-    env: { ...process.env, HORIZON_OPEN_BROWSER: "false", HORIZON_ALLOW_MULTIPLE_INSTANCES: "false", HORIZON_RUNTIME_DIR: runtime },
+    env: { ...appEnv, HORIZON_ALLOW_MULTIPLE_INSTANCES: "false" },
     stdio: ["ignore", "pipe", "pipe"]
   });
   let duplicateOutput = "";
@@ -203,13 +242,12 @@ test("local agent API rejects cross-origin changes and executes a durable offlin
   assert.equal(plannedResponse.status, 200);
   const plannedRun = (await plannedResponse.json()).run;
   const plannedApproval = await waitRun(plannedRun.id, "awaiting_approval");
-  assert.equal(plannedApproval.plan.steps[0].status, "running");
+  assert.equal(plannedApproval.plan, undefined, "Ordinary chat must never use the saved-agent planner.");
   assert.equal(fs.existsSync(path.join(notes, "planned.txt")), false);
   assert.equal((await post("approve", { id: plannedRun.id, approvalId: plannedApproval.approval.id, approve: true })).status, 200);
   const plannedDone = await waitRun(plannedRun.id, "completed");
-  assert.equal(plannedDone.verification.status, "passed");
-  assert.equal(plannedDone.plan.steps[0].verification, "passed");
-  assert.match(plannedDone.plan.steps[0].evidence, /Independent file readback matched SHA-256/);
+  assert.equal(plannedDone.verification.status, "not_configured");
+  assert.equal(plannedDone.plan, undefined);
   assert.equal(fs.readFileSync(path.join(notes, "planned.txt"), "utf8"), "Verified planned write.");
   assert.equal((await post("erase", {})).status, 200);
   const erased = await (await fetch(address + "/api/agents")).json();
